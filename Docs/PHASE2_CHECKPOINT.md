@@ -3,7 +3,7 @@
 Date: 2026-08-05
 Task ID: 2A
 Task: Repository and STM32CubeIDE baseline
-Status: PARTIAL
+Status: Pass
 
 ## Repository
 
@@ -35,7 +35,7 @@ Status: PARTIAL
 ## Build Result
 
 - Errors: 0
-- Warnings: 1
+- Warnings: 0
 - text: 18992 bytes
 - data: 20 bytes
 - bss: 2172 bytes
@@ -69,3 +69,12 @@ Status: PARTIAL
 This checkpoint contains only the generated STM32CubeIDE baseline.
 It does not claim working sensors, radio, LoRaWAN, low-power operation,
 watchdog, self-test or hardware validation.
+## 2A Closure
+
+- Project encoding explicitly set to UTF-8.
+- GNU linker RWX warning investigated with readelf.
+- Root cause: writable attributes on FLASH-resident metadata sections.
+- .ARM.extab, .preinit_array, .init_array and .fini_array marked READONLY.
+- Clean build completed with 0 errors and 0 warnings.
+- Task 2A accepted as PASS.
+- Next task: 2B - Power, SWD, Flash and Debug validation.
