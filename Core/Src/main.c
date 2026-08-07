@@ -107,7 +107,10 @@ int main(void)
   MX_I2C3_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  GPIO_PinState button_idle;
+  uint8_t led_step = 0;
 
+  button_idle = HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -115,7 +118,53 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+	  GPIO_PinState button_now;
 
+	  button_now = HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin);
+
+	  if (button_now != button_idle)
+	  {
+	      /* Simple debounce */
+	      HAL_Delay(30);
+
+	      if (HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin) != button_idle)
+	      {
+	          switch (led_step)
+	          {
+	          case 0:
+	              HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+	              break;
+
+	          case 1:
+	              HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
+	              break;
+
+	          case 2:
+	              HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin);
+	              break;
+
+	          default:
+	              led_step = 0;
+	              break;
+	          }
+
+	          led_step++;
+
+	          if (led_step >= 3)
+	          {
+	              led_step = 0;
+	          }
+
+	          /* Wait until button is released */
+	          while (HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin) != button_idle)
+	          {
+	              HAL_Delay(10);
+	          }
+
+	          /* Release debounce */
+	          HAL_Delay(30);
+	      }
+	  }
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -137,23 +186,15 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 
-  /** Configure LSE Drive Capability
-  */
-  HAL_PWR_EnableBkUpAccess();
-  __HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_LOW);
-
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSE|RCC_OSCILLATORTYPE_MSI;
-  RCC_OscInitStruct.LSEState = RCC_LSE_ON;
-  RCC_OscInitStruct.MSIState = RCC_MSI_ON;
-  RCC_OscInitStruct.MSICalibrationValue = 0;
-  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 40;
+  RCC_OscInitStruct.PLL.PLLN = 20;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
@@ -175,10 +216,6 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-
-  /** Enable MSI Auto calibration
-  */
-  HAL_RCCEx_EnableMSIPLLMode();
 }
 
 /**
@@ -264,7 +301,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x00000E14;
+  hi2c1.Init.Timing = 0x10909CEC;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
