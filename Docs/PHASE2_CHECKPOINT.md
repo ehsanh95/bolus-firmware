@@ -78,3 +78,24 @@ watchdog, self-test or hardware validation.
 - Clean build completed with 0 errors and 0 warnings.
 - Task 2A accepted as PASS.
 - Next task: 2B - Power, SWD, Flash and Debug validation.
+## Task 2B — Power, SWD, Flash and Debug
+
+Status: PASS
+
+- Target voltage measured by ST-Link: 3.26 V
+- STM32 detected successfully over SWD
+- Device ID: 0x415
+- SWD frequency: 4 MHz
+- Connection mode: Under Reset
+- Firmware programmed successfully
+- Flash verification successful
+- Debug session started successfully
+- CPU reached breakpoint at main()/HAL_Init()
+- Hardware reset returned correctly to breakpoint
+- Reset/debug cycle repeated successfully 3 times
+
+Result:
+Power → SWD → Flash → Verify → Execute → Debug → Reset: PASS
+
+Next:
+Task 2C — Clock, GPIO, LED, Button and UART bring-up.
