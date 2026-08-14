@@ -45,13 +45,15 @@ ADC_HandleTypeDef hadc1;
 I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c3;
 
+IWDG_HandleTypeDef hiwdg;
+
 SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
 
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+uint32_t reset_flags = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -63,6 +65,7 @@ static void MX_SPI2_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_I2C3_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_IWDG_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -88,7 +91,8 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+  reset_flags = RCC->CSR;
+  __HAL_RCC_CLEAR_RESET_FLAGS();
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -106,65 +110,20 @@ int main(void)
   MX_ADC1_Init();
   MX_I2C3_Init();
   MX_USART2_UART_Init();
+  MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
-  GPIO_PinState button_idle;
-  uint8_t led_step = 0;
 
-  button_idle = HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	      HAL_IWDG_Refresh(&hiwdg);
+
+	      HAL_Delay(500);
     /* USER CODE END WHILE */
-	  GPIO_PinState button_now;
 
-	  button_now = HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin);
-
-	  if (button_now != button_idle)
-	  {
-	      /* Simple debounce */
-	      HAL_Delay(30);
-
-	      if (HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin) != button_idle)
-	      {
-	          switch (led_step)
-	          {
-	          case 0:
-	              HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
-	              break;
-
-	          case 1:
-	              HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
-	              break;
-
-	          case 2:
-	              HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin);
-	              break;
-
-	          default:
-	              led_step = 0;
-	              break;
-	          }
-
-	          led_step++;
-
-	          if (led_step >= 3)
-	          {
-	              led_step = 0;
-	          }
-
-	          /* Wait until button is released */
-	          while (HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin) != button_idle)
-	          {
-	              HAL_Delay(10);
-	          }
-
-	          /* Release debounce */
-	          HAL_Delay(30);
-	      }
-	  }
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -189,8 +148,9 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 1;
@@ -378,6 +338,35 @@ static void MX_I2C3_Init(void)
   /* USER CODE BEGIN I2C3_Init 2 */
 
   /* USER CODE END I2C3_Init 2 */
+
+}
+
+/**
+  * @brief IWDG Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_IWDG_Init(void)
+{
+
+  /* USER CODE BEGIN IWDG_Init 0 */
+
+  /* USER CODE END IWDG_Init 0 */
+
+  /* USER CODE BEGIN IWDG_Init 1 */
+
+  /* USER CODE END IWDG_Init 1 */
+  hiwdg.Instance = IWDG;
+  hiwdg.Init.Prescaler = IWDG_PRESCALER_32;
+  hiwdg.Init.Window = 4095;
+  hiwdg.Init.Reload = 999;
+  if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN IWDG_Init 2 */
+
+  /* USER CODE END IWDG_Init 2 */
 
 }
 
