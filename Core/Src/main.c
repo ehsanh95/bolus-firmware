@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bolus_power.h"
+#include "fault_manager.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -113,6 +114,7 @@ int main(void)
   MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
   BolusPower_Init();
+  FaultManager_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
