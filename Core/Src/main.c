@@ -23,6 +23,9 @@
 /* USER CODE BEGIN Includes */
 #include "bolus_power.h"
 #include "fault_manager.h"
+#include "bolus_led.h"
+#include "battery.h"
+#include "tmp117.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -55,6 +58,21 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 uint32_t reset_flags = 0;
+
+battery_status_t battery_status;
+
+GPIO_PinState last_button_state = GPIO_PIN_SET;
+
+bool tmp117_active = false;
+
+uint8_t tmp117_buffer[3] = {0};
+
+uint16_t tmp117_device_id = 0;
+double tmp117_temperature_c = 0.0;
+
+bool tmp117_init_ok = false;
+bool tmp117_read_ok = false;
+bool tmp117_shutdown_ok = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -68,7 +86,7 @@ static void MX_I2C3_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_IWDG_Init(void);
 /* USER CODE BEGIN PFP */
-
+static void PowerTest_BlinkAck(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -113,17 +131,249 @@ int main(void)
   MX_USART2_UART_Init();
   MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
+
   BolusPower_Init();
+
+  BolusLed_Init();
+
   FaultManager_Init();
+
+
+  battery_status =
+      Battery_Init(&hadc1);
+
+
+  /*
+   * One blink:
+   * Battery driver initialized successfully.
+   */
+  if (battery_status == BATTERY_OK)
+  {
+      BolusLed_On(BOLUS_LED_SENSOR);
+
+      HAL_Delay(150);
+
+      BolusLed_Off(BOLUS_LED_SENSOR);
+  }
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	      HAL_IWDG_Refresh(&hiwdg);
+	  GPIO_PinState button_state =
+	      HAL_GPIO_ReadPin(
+	          BUTTON_GPIO_Port,
+	          BUTTON_Pin);
 
-	      HAL_Delay(500);
+
+	  /*
+	   * Detect button press:
+	   * HIGH -> LOW
+	   */
+	  if ((last_button_state == GPIO_PIN_SET) &&
+	      (button_state == GPIO_PIN_RESET))
+	  {
+	      HAL_Delay(30);
+
+	      /*
+	       * Debounce confirmation
+	       */
+	      if (HAL_GPIO_ReadPin(
+	              BUTTON_GPIO_Port,
+	              BUTTON_Pin) == GPIO_PIN_RESET)
+	      {
+	          /*
+	           * =====================================================
+	           * TMP117 currently OFF
+	           * First press -> Power ON + Read
+	           * =====================================================
+	           */
+	          if (tmp117_active == false)
+	          {
+	              tmp117_init_ok = false;
+	              tmp117_read_ok = false;
+
+	              /*
+	               * 1. Enable physical power
+	               */
+	              BolusPower_On(BOLUS_POWER_TMP117);
+
+	              /*
+	               * Allow supply to stabilize
+	               */
+	              HAL_Delay(10);
+
+
+	              /*
+	               * 2. Initialize TMP117
+	               *
+	               * Our default mode is Shutdown,
+	               * so configuration happens while
+	               * the sensor is not continuously converting.
+	               */
+	              tmp117_init_ok =
+	                  TMP117_Init(
+	                      &hi2c3,
+	                      tmp117_buffer);
+
+
+	              if (tmp117_init_ok)
+	              {
+	                  /*
+	                   * 3. Read Device ID
+	                   */
+	                  tmp117_init_ok =
+	                      TMP117_getDeviceID(
+	                          &hi2c3,
+	                          tmp117_buffer,
+	                          &tmp117_device_id);
+	              }
+
+
+	              if (tmp117_init_ok)
+	              {
+	                  /*
+	                   * 4. Start continuous conversion.
+	                   */
+	                  tmp117_init_ok =
+	                      TMP117_setConversionMode(
+	                          &hi2c3,
+	                          tmp117_buffer,
+	                          TMP117_CC_MODE);
+	              }
+
+
+	              if (tmp117_init_ok)
+	              {
+	                  /*
+	                   * Current configuration:
+	                   * no averaging + 15.5 ms conversion.
+	                   *
+	                   * Give the first conversion enough time.
+	                   */
+	                  HAL_Delay(20);
+
+
+	                  /*
+	                   * 5. Read temperature
+	                   */
+	                  tmp117_read_ok =
+	                      TMP117_getResultTemperature(
+	                          &hi2c3,
+	                          tmp117_buffer,
+	                          &tmp117_temperature_c);
+	              }
+
+
+	              /*
+	               * Successful startup:
+	               * leave physical power ON
+	               * and leave TMP117 in Continuous Conversion.
+	               */
+	              if (tmp117_init_ok &&
+	                  tmp117_read_ok)
+	              {
+	                  tmp117_active = true;
+
+	                  /*
+	                   * One long blink = ON / Read OK
+	                   */
+	                  BolusLed_On(BOLUS_LED_SENSOR);
+	                  HAL_Delay(200);
+	                  BolusLed_Off(BOLUS_LED_SENSOR);
+	              }
+	              else
+	              {
+	                  /*
+	                   * Startup/read failed.
+	                   *
+	                   * Try to put device in shutdown first.
+	                   */
+	                  TMP117_setConversionMode(
+	                      &hi2c3,
+	                      tmp117_buffer,
+	                      TMP117_SD_MODE);
+
+	                  HAL_Delay(5);
+
+	                  /*
+	                   * Then remove physical power.
+	                   */
+	                  BolusPower_Off(BOLUS_POWER_TMP117);
+
+	                  tmp117_active = false;
+
+	                  /*
+	                   * Two short blinks = error
+	                   */
+	                  for (uint8_t i = 0;
+	                       i < 2U;
+	                       i++)
+	                  {
+	                      BolusLed_On(BOLUS_LED_SENSOR);
+	                      HAL_Delay(80);
+
+	                      BolusLed_Off(BOLUS_LED_SENSOR);
+	                      HAL_Delay(80);
+	                  }
+	              }
+	          }
+
+	          /*
+	           * =====================================================
+	           * TMP117 currently ON
+	           * Second press -> Software Shutdown -> Power OFF
+	           * =====================================================
+	           */
+	          else
+	          {
+	              /*
+	               * 1. Disable sensor internally first.
+	               */
+	              tmp117_shutdown_ok =
+	                  TMP117_setConversionMode(
+	                      &hi2c3,
+	                      tmp117_buffer,
+	                      TMP117_SD_MODE);
+
+
+	              /*
+	               * Give the I2C write / mode transition
+	               * a little time before removing power.
+	               */
+	              HAL_Delay(5);
+
+
+	              /*
+	               * 2. Remove physical supply.
+	               */
+	              BolusPower_Off(BOLUS_POWER_TMP117);
+
+	              tmp117_active = false;
+
+
+	              /*
+	               * Short blink = OFF
+	               */
+	              BolusLed_On(BOLUS_LED_SENSOR);
+	              HAL_Delay(80);
+	              BolusLed_Off(BOLUS_LED_SENSOR);
+	          }
+	      }
+	  }
+
+
+	  last_button_state = button_state;
+
+
+	  /*
+	   * Keep watchdog alive.
+	   */
+	  HAL_IWDG_Refresh(&hiwdg);
+
+	  HAL_Delay(10);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -505,14 +755,22 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, RFM_RST_Pin|LED3_Pin|MPU_PWR_ON_Pin|MCU_BCK_PWR_ON_Pin
-                          |SOC_CHK_ON_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, RFM_RST_Pin|LED3_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, RFM_PWR_ON_Pin|Main_Reg_PWR_ON_Pin|PEDO_PWR_Pin|LED1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, RFM_PWR_ON_Pin|PEDO_PWR_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, LED2_Pin|TMP_PWR_ON_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, Main_Reg_PWR_ON_Pin|LED1_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, MPU_PWR_ON_Pin|MCU_BCK_PWR_ON_Pin|SOC_CHK_ON_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(TMP_PWR_ON_GPIO_Port, TMP_PWR_ON_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : TMP_INT_Pin PEDO_INT2_Pin PEDO_INT1_Pin */
   GPIO_InitStruct.Pin = TMP_INT_Pin|PEDO_INT2_Pin|PEDO_INT1_Pin;
