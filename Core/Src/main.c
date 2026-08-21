@@ -26,6 +26,8 @@
 #include "bolus_led.h"
 #include "battery.h"
 #include "tmp117.h"
+#include "MPU6050.h"
+#include "bma456h.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,22 +59,81 @@ SPI_HandleTypeDef hspi2;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-uint32_t reset_flags = 0;
+
+uint32_t reset_flags = 0U;
 
 battery_status_t battery_status;
 
 GPIO_PinState last_button_state = GPIO_PIN_SET;
 
+
+/* ============================================================
+ * TMP117 debug variables
+ * ============================================================ */
+
 bool tmp117_active = false;
 
 uint8_t tmp117_buffer[3] = {0};
 
-uint16_t tmp117_device_id = 0;
+uint16_t tmp117_device_id = 0U;
+
 double tmp117_temperature_c = 0.0;
 
 bool tmp117_init_ok = false;
+
 bool tmp117_read_ok = false;
+
 bool tmp117_shutdown_ok = false;
+
+uint32_t tmp117_last_read_ms = 0U;
+
+
+/* ============================================================
+ * MPU6050 debug variables
+ * ============================================================ */
+
+MPU6050_t mpu_data = {0};
+
+bool mpu_active = false;
+
+bool mpu_bus_ok = false;
+
+uint8_t mpu_init_status = 1U;
+
+uint32_t mpu_last_read_ms = 0U;
+
+
+/* ============================================================
+ * BMA456 raw SPI bring-up variables
+ * ============================================================ */
+
+uint8_t bma456_first_read = 0U;
+
+uint8_t bma456_chip_id = 0U;
+
+HAL_StatusTypeDef bma456_spi_status = HAL_ERROR;
+
+bool bma456_chip_id_ok = false;
+
+uint8_t bma456_pwr_conf = 0U;
+
+HAL_StatusTypeDef bma456_pwr_status = HAL_ERROR;
+
+uint8_t bma456_pwr_conf_1 = 0U;
+
+uint8_t bma456_pwr_conf_2 = 0U;
+
+uint8_t bma456_chip_id_3 = 0U;
+
+/* BMA456 Step Counter test */
+int8_t bma456_init_result = BMA4_E_INVALID_STATUS;
+int8_t bma456_read_result = BMA4_E_INVALID_STATUS;
+
+uint32_t bma456_step_count = 0U;
+uint32_t bma456_last_read_tick = 0U;
+
+bool bma456_step_ready = false;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -86,11 +147,82 @@ static void MX_I2C3_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_IWDG_Init(void);
 /* USER CODE BEGIN PFP */
-static void PowerTest_BlinkAck(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+static HAL_StatusTypeDef BMA456_RawReadRegister(
+    uint8_t reg,
+    uint8_t *value)
+{
+    uint8_t tx[3] = {0};
+    uint8_t rx[3] = {0};
+
+    HAL_StatusTypeDef status;
+
+    if (value == NULL)
+    {
+        return HAL_ERROR;
+    }
+
+    /*
+     * BMA456 SPI read
+     *
+     * Byte 0:
+     *   Read command + register address
+     *
+     * Byte 1:
+     *   Dummy clock
+     *
+     * Byte 2:
+     *   Clock actual register data
+     */
+    tx[0] = reg | 0x80U;
+    tx[1] = 0x00U;
+    tx[2] = 0x00U;
+
+
+    /*
+     * CS active LOW
+     */
+    HAL_GPIO_WritePin(
+        Pedo_NSS_GPIO_Port,
+        Pedo_NSS_Pin,
+        GPIO_PIN_RESET);
+
+
+    status =
+        HAL_SPI_TransmitReceive(
+            &hspi2,
+            tx,
+            rx,
+            3U,
+            20U);
+
+
+    /*
+     * CS inactive HIGH
+     */
+    HAL_GPIO_WritePin(
+        Pedo_NSS_GPIO_Port,
+        Pedo_NSS_Pin,
+        GPIO_PIN_SET);
+
+
+    if (status == HAL_OK)
+    {
+        /*
+         * rx[0] = undefined during command
+         * rx[1] = dummy
+         * rx[2] = actual register value
+         */
+        *value = rx[2];
+    }
+
+    return status;
+}
 
 /* USER CODE END 0 */
 
@@ -110,8 +242,23 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+
   reset_flags = RCC->CSR;
   __HAL_RCC_CLEAR_RESET_FLAGS();
+
+  /*
+   * ============================================================
+   * BOLUS DEBUG SUPPORT
+   * ============================================================
+   * Freeze IWDG while CPU is halted by the debugger.
+   *
+   * This affects DEBUG sessions only.
+   * During normal RUN execution IWDG remains active.
+   */
+  #ifdef DEBUG
+  __HAL_DBGMCU_FREEZE_IWDG();
+  #endif
+
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -132,6 +279,11 @@ int main(void)
   MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
 
+
+  /* ============================================================
+   * Bolus subsystem initialization
+   * ============================================================ */
+
   BolusPower_Init();
 
   BolusLed_Init();
@@ -139,22 +291,183 @@ int main(void)
   FaultManager_Init();
 
 
+  /* ============================================================
+   * Battery driver initialization
+   * ============================================================ */
+
   battery_status =
       Battery_Init(&hadc1);
 
 
   /*
-   * One blink:
-   * Battery driver initialized successfully.
+   * One blink means Battery driver initialized.
    */
   if (battery_status == BATTERY_OK)
   {
-      BolusLed_On(BOLUS_LED_SENSOR);
+      BolusLed_On(
+          BOLUS_LED_SENSOR);
 
       HAL_Delay(150);
 
-      BolusLed_Off(BOLUS_LED_SENSOR);
+      BolusLed_Off(
+          BOLUS_LED_SENSOR);
   }
+
+
+  /* ============================================================
+   * BMA456 RAW SPI BRING-UP TEST
+   * ============================================================
+   *
+   * Goal:
+   *
+   * Power ON
+   *      ↓
+   * First dummy CHIP_ID read
+   *      ↓
+   * Second CHIP_ID read
+   *      ↓
+   * Read PWR_CONF
+   *
+   * We are NOT using Bosch SensorAPI yet.
+   * ============================================================
+   */
+
+
+  /*
+   * Physical power ON.
+   */
+  BolusPower_On(
+      BOLUS_POWER_BMA456);
+
+
+  /*
+   * Allow BMA456 supply/startup to stabilize.
+   */
+  HAL_Delay(10);
+
+
+  /*
+   * Make sure CS is inactive before transaction.
+   */
+  HAL_GPIO_WritePin(
+      Pedo_NSS_GPIO_Port,
+      Pedo_NSS_Pin,
+      GPIO_PIN_SET);
+
+  HAL_Delay(1);
+
+
+  /*
+   * ------------------------------------------------------------
+   * First CHIP_ID read
+   * ------------------------------------------------------------
+   *
+   * This first SPI transaction is intentionally discarded.
+   */
+  (void)BMA456_RawReadRegister(
+      0x00U,
+      &bma456_first_read);
+
+
+  HAL_Delay(1);
+
+
+  /*
+   * ------------------------------------------------------------
+   * Second CHIP_ID read
+   * ------------------------------------------------------------
+   *
+   * Register:
+   * 0x00 = CHIP_ID
+   *
+   * Expected BMA456 CHIP_ID:
+   * 0x16 = decimal 22
+   */
+  bma456_spi_status =
+      BMA456_RawReadRegister(
+          0x00U,
+          &bma456_chip_id);
+
+
+  /*
+   * Communication PASS condition.
+   */
+  bma456_chip_id_ok =
+      ((bma456_spi_status == HAL_OK) &&
+       (bma456_chip_id == 0x16U));
+
+
+  /*
+   * ============================================================
+   * BMA456 SPI sequencing diagnostic
+   * ============================================================
+   *
+   * Goal:
+   *
+   * CHIP_ID       -> already read above
+   * PWR_CONF #1   -> register 0x7C
+   * PWR_CONF #2   -> register 0x7C again
+   * CHIP_ID #3    -> register 0x00 again
+   *
+   * This lets us detect whether SPI data is delayed
+   * by one transaction.
+   * ============================================================
+   */
+
+
+  /*
+   * First PWR_CONF read
+   */
+  bma456_pwr_status =
+      BMA456_RawReadRegister(
+          0x7CU,
+          &bma456_pwr_conf_1);
+
+
+  HAL_Delay(1);
+
+
+  /*
+   * Second PWR_CONF read
+   */
+  (void)BMA456_RawReadRegister(
+      0x7CU,
+      &bma456_pwr_conf_2);
+
+
+  HAL_Delay(1);
+
+
+  /*
+   * Read CHIP_ID again
+   */
+  (void)BMA456_RawReadRegister(
+      0x00U,
+      &bma456_chip_id_3);
+
+  /*
+   * ============================================================
+   * BMA456 Bosch SensorAPI Step Counter initialization
+   * ============================================================
+   *
+   * BMA456 power is already ON above.
+   * Raw SPI communication has already been validated.
+   */
+
+  bma456_init_result =
+      BMA456_Bolus_InitStepCounter(
+          &hspi2);
+
+  bma456_step_ready =
+      (bma456_init_result == BMA4_OK);
+
+  if (bma456_step_ready)
+  {
+      bma456_read_result =
+          BMA456_Bolus_ReadStepCount(
+              &bma456_step_count);
+  }
+
 
   /* USER CODE END 2 */
 
@@ -162,20 +475,48 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+	  /*
+	   * ------------------------------------------------------------
+	   * BMA456 Step Counter polling
+	   * ------------------------------------------------------------
+	   *
+	   * Poll every 500 ms.
+	   * No BMA interrupt is used in Phase 4.
+	   */
+	  if (bma456_step_ready)
+	  {
+	      if ((HAL_GetTick() - bma456_last_read_tick) >= 500U)
+	      {
+	          bma456_last_read_tick = HAL_GetTick();
+
+	          bma456_read_result =
+	              BMA456_Bolus_ReadStepCount(
+	                  &bma456_step_count);
+	      }
+	  }
+
 	  GPIO_PinState button_state =
 	      HAL_GPIO_ReadPin(
 	          BUTTON_GPIO_Port,
 	          BUTTON_Pin);
 
 
-	  /*
-	   * Detect button press:
-	   * HIGH -> LOW
-	   */
+	  /* ============================================================
+	   * Button press detection
+	   *
+	   * Released = HIGH
+	   * Pressed  = LOW
+	   * ============================================================ */
+
 	  if ((last_button_state == GPIO_PIN_SET) &&
 	      (button_state == GPIO_PIN_RESET))
 	  {
 	      HAL_Delay(30);
+
 
 	      /*
 	       * Debounce confirmation
@@ -185,33 +526,131 @@ int main(void)
 	              BUTTON_Pin) == GPIO_PIN_RESET)
 	      {
 	          /*
-	           * =====================================================
-	           * TMP117 currently OFF
-	           * First press -> Power ON + Read
-	           * =====================================================
+	           * ====================================================
+	           * FIRST PRESS
+	           *
+	           * Power ON + Init MPU6050 and TMP117
+	           * ====================================================
 	           */
-	          if (tmp117_active == false)
+
+	          if ((!mpu_active) &&
+	              (!tmp117_active))
 	          {
-	              tmp117_init_ok = false;
-	              tmp117_read_ok = false;
+	              /*
+	               * ================================================
+	               * MPU6050
+	               * ================================================
+	               */
+
+	              mpu_init_status = 1U;
+
+	              mpu_bus_ok = false;
+
 
 	              /*
-	               * 1. Enable physical power
+	               * Physical power ON
 	               */
-	              BolusPower_On(BOLUS_POWER_TMP117);
+	              BolusPower_On(
+	                  BOLUS_POWER_MPU6050);
 
-	              /*
-	               * Allow supply to stabilize
-	               */
+
 	              HAL_Delay(10);
 
 
 	              /*
-	               * 2. Initialize TMP117
+	               * Driver init
 	               *
-	               * Our default mode is Shutdown,
-	               * so configuration happens while
-	               * the sensor is not continuously converting.
+	               * 0 = success
+	               * 1 = failure
+	               */
+	              mpu_init_status =
+	                  MPU6050_Init(
+	                      &hi2c1);
+
+
+	              if (mpu_init_status == 0U)
+	              {
+	                  /*
+	                   * Init may leave device in sleep
+	                   * because SLEEP_BETWEEN_SAMPLES is enabled.
+	                   */
+	                  MPU6050_WakeAndStabilize(
+	                      &hi2c1);
+
+
+	                  /*
+	                   * Confirm I2C communication.
+	                   */
+	                  mpu_bus_ok =
+	                      (HAL_I2C_IsDeviceReady(
+	                          &hi2c1,
+	                          MPU6050_I2C_ADDRESS,
+	                          2U,
+	                          MPU6050_I2C_TIMEOUT_MS)
+	                       == HAL_OK);
+
+
+	                  if (mpu_bus_ok)
+	                  {
+	                      /*
+	                       * First sample.
+	                       */
+	                      MPU6050_Read_All(
+	                          &hi2c1,
+	                          &mpu_data);
+
+
+	                      mpu_active = true;
+
+
+	                      mpu_last_read_ms =
+	                          HAL_GetTick();
+	                  }
+	              }
+
+
+	              /*
+	               * MPU6050 startup failure cleanup
+	               */
+	              if (!mpu_active)
+	              {
+	                  MPU6050_Sleep(
+	                      &hi2c1);
+
+
+	                  HAL_Delay(5);
+
+
+	                  BolusPower_Off(
+	                      BOLUS_POWER_MPU6050);
+	              }
+
+
+	              /*
+	               * ================================================
+	               * TMP117
+	               * ================================================
+	               */
+
+	              tmp117_init_ok = false;
+
+	              tmp117_read_ok = false;
+
+	              tmp117_shutdown_ok = false;
+
+
+	              /*
+	               * Physical power ON
+	               */
+	              BolusPower_On(
+	                  BOLUS_POWER_TMP117);
+
+
+	              HAL_Delay(10);
+
+
+	              /*
+	               * Driver init
 	               */
 	              tmp117_init_ok =
 	                  TMP117_Init(
@@ -219,11 +658,11 @@ int main(void)
 	                      tmp117_buffer);
 
 
+	              /*
+	               * Read Device ID
+	               */
 	              if (tmp117_init_ok)
 	              {
-	                  /*
-	                   * 3. Read Device ID
-	                   */
 	                  tmp117_init_ok =
 	                      TMP117_getDeviceID(
 	                          &hi2c3,
@@ -232,11 +671,11 @@ int main(void)
 	              }
 
 
+	              /*
+	               * Continuous conversion for Live Debug
+	               */
 	              if (tmp117_init_ok)
 	              {
-	                  /*
-	                   * 4. Start continuous conversion.
-	                   */
 	                  tmp117_init_ok =
 	                      TMP117_setConversionMode(
 	                          &hi2c3,
@@ -245,20 +684,14 @@ int main(void)
 	              }
 
 
+	              /*
+	               * First temperature sample
+	               */
 	              if (tmp117_init_ok)
 	              {
-	                  /*
-	                   * Current configuration:
-	                   * no averaging + 15.5 ms conversion.
-	                   *
-	                   * Give the first conversion enough time.
-	                   */
 	                  HAL_Delay(20);
 
 
-	                  /*
-	                   * 5. Read temperature
-	                   */
 	                  tmp117_read_ok =
 	                      TMP117_getResultTemperature(
 	                          &hi2c3,
@@ -268,115 +701,234 @@ int main(void)
 
 
 	              /*
-	               * Successful startup:
-	               * leave physical power ON
-	               * and leave TMP117 in Continuous Conversion.
+	               * TMP117 startup success
 	               */
 	              if (tmp117_init_ok &&
 	                  tmp117_read_ok)
 	              {
 	                  tmp117_active = true;
 
-	                  /*
-	                   * One long blink = ON / Read OK
-	                   */
-	                  BolusLed_On(BOLUS_LED_SENSOR);
-	                  HAL_Delay(200);
-	                  BolusLed_Off(BOLUS_LED_SENSOR);
+
+	                  tmp117_last_read_ms =
+	                      HAL_GetTick();
 	              }
 	              else
 	              {
 	                  /*
-	                   * Startup/read failed.
-	                   *
-	                   * Try to put device in shutdown first.
+	                   * TMP117 startup failure cleanup
 	                   */
-	                  TMP117_setConversionMode(
+
+	                  (void)TMP117_setConversionMode(
 	                      &hi2c3,
 	                      tmp117_buffer,
 	                      TMP117_SD_MODE);
 
+
 	                  HAL_Delay(5);
 
-	                  /*
-	                   * Then remove physical power.
-	                   */
-	                  BolusPower_Off(BOLUS_POWER_TMP117);
+
+	                  BolusPower_Off(
+	                      BOLUS_POWER_TMP117);
+
 
 	                  tmp117_active = false;
+	              }
 
+
+	              /*
+	               * At least one sensor started successfully.
+	               */
+	              if (mpu_active ||
+	                  tmp117_active)
+	              {
+	                  BolusLed_On(
+	                      BOLUS_LED_SENSOR);
+
+
+	                  HAL_Delay(200);
+
+
+	                  BolusLed_Off(
+	                      BOLUS_LED_SENSOR);
+	              }
+	              else
+	              {
 	                  /*
-	                   * Two short blinks = error
+	                   * Both sensors failed.
+	                   *
+	                   * Two short blinks.
 	                   */
-	                  for (uint8_t i = 0;
+	                  for (uint8_t i = 0U;
 	                       i < 2U;
 	                       i++)
 	                  {
-	                      BolusLed_On(BOLUS_LED_SENSOR);
+	                      BolusLed_On(
+	                          BOLUS_LED_SENSOR);
+
+
 	                      HAL_Delay(80);
 
-	                      BolusLed_Off(BOLUS_LED_SENSOR);
+
+	                      BolusLed_Off(
+	                          BOLUS_LED_SENSOR);
+
+
 	                      HAL_Delay(80);
 	                  }
 	              }
 	          }
 
+
 	          /*
-	           * =====================================================
-	           * TMP117 currently ON
-	           * Second press -> Software Shutdown -> Power OFF
-	           * =====================================================
+	           * ====================================================
+	           * SECOND PRESS
+	           *
+	           * Software sleep/shutdown
+	           * then physical Power OFF
+	           * ====================================================
 	           */
+
 	          else
 	          {
 	              /*
-	               * 1. Disable sensor internally first.
+	               * ================================================
+	               * MPU6050 OFF
+	               * ================================================
 	               */
-	              tmp117_shutdown_ok =
-	                  TMP117_setConversionMode(
-	                      &hi2c3,
-	                      tmp117_buffer,
-	                      TMP117_SD_MODE);
+
+	              if (mpu_active)
+	              {
+	                  MPU6050_Sleep(
+	                      &hi2c1);
+
+
+	                  HAL_Delay(5);
+
+
+	                  BolusPower_Off(
+	                      BOLUS_POWER_MPU6050);
+
+
+	                  mpu_active = false;
+
+	                  mpu_bus_ok = false;
+	              }
 
 
 	              /*
-	               * Give the I2C write / mode transition
-	               * a little time before removing power.
+	               * ================================================
+	               * TMP117 OFF
+	               * ================================================
 	               */
-	              HAL_Delay(5);
+
+	              if (tmp117_active)
+	              {
+	                  tmp117_shutdown_ok =
+	                      TMP117_setConversionMode(
+	                          &hi2c3,
+	                          tmp117_buffer,
+	                          TMP117_SD_MODE);
+
+
+	                  HAL_Delay(5);
+
+
+	                  BolusPower_Off(
+	                      BOLUS_POWER_TMP117);
+
+
+	                  tmp117_active = false;
+	              }
 
 
 	              /*
-	               * 2. Remove physical supply.
+	               * OFF indication
 	               */
-	              BolusPower_Off(BOLUS_POWER_TMP117);
+	              BolusLed_On(
+	                  BOLUS_LED_SENSOR);
 
-	              tmp117_active = false;
 
-
-	              /*
-	               * Short blink = OFF
-	               */
-	              BolusLed_On(BOLUS_LED_SENSOR);
 	              HAL_Delay(80);
-	              BolusLed_Off(BOLUS_LED_SENSOR);
+
+
+	              BolusLed_Off(
+	                  BOLUS_LED_SENSOR);
 	          }
 	      }
 	  }
 
 
-	  last_button_state = button_state;
+	  /* ============================================================
+	   * Live MPU6050 sampling
+	   * ============================================================ */
+
+	  if (mpu_active)
+	  {
+	      if ((HAL_GetTick() -
+	           mpu_last_read_ms) >= 100U)
+	      {
+	          mpu_bus_ok =
+	              (HAL_I2C_IsDeviceReady(
+	                  &hi2c1,
+	                  MPU6050_I2C_ADDRESS,
+	                  1U,
+	                  MPU6050_I2C_TIMEOUT_MS)
+	               == HAL_OK);
 
 
-	  /*
-	   * Keep watchdog alive.
-	   */
-	  HAL_IWDG_Refresh(&hiwdg);
+	          if (mpu_bus_ok)
+	          {
+	              MPU6050_Read_All(
+	                  &hi2c1,
+	                  &mpu_data);
+	          }
+
+
+	          mpu_last_read_ms =
+	              HAL_GetTick();
+	      }
+	  }
+
+
+	  /* ============================================================
+	   * Live TMP117 sampling
+	   * ============================================================ */
+
+	  if (tmp117_active)
+	  {
+	      if ((HAL_GetTick() -
+	           tmp117_last_read_ms) >= 250U)
+	      {
+	          tmp117_read_ok =
+	              TMP117_getResultTemperature(
+	                  &hi2c3,
+	                  tmp117_buffer,
+	                  &tmp117_temperature_c);
+
+
+	          tmp117_last_read_ms =
+	              HAL_GetTick();
+	      }
+	  }
+
+
+	  /* ============================================================
+	   * Button edge state
+	   * ============================================================ */
+
+	  last_button_state =
+	      button_state;
+
+
+	  /* ============================================================
+	   * Watchdog service
+	   * ============================================================ */
+
+	  HAL_IWDG_Refresh(
+	      &hiwdg);
+
 
 	  HAL_Delay(10);
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
 }
@@ -681,11 +1233,11 @@ static void MX_SPI2_Init(void)
   hspi2.Instance = SPI2;
   hspi2.Init.Mode = SPI_MODE_MASTER;
   hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_4BIT;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi2.Init.NSS = SPI_NSS_HARD_OUTPUT;
-  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi2.Init.NSS = SPI_NSS_SOFT;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
   hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -764,13 +1316,13 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, Pedo_NSS_Pin|TMP_PWR_ON_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, Main_Reg_PWR_ON_Pin|LED1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, MPU_PWR_ON_Pin|MCU_BCK_PWR_ON_Pin|SOC_CHK_ON_Pin, GPIO_PIN_SET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(TMP_PWR_ON_GPIO_Port, TMP_PWR_ON_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : TMP_INT_Pin PEDO_INT2_Pin PEDO_INT1_Pin */
   GPIO_InitStruct.Pin = TMP_INT_Pin|PEDO_INT2_Pin|PEDO_INT1_Pin;
@@ -794,8 +1346,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LED2_Pin TMP_PWR_ON_Pin */
-  GPIO_InitStruct.Pin = LED2_Pin|TMP_PWR_ON_Pin;
+  /*Configure GPIO pins : LED2_Pin Pedo_NSS_Pin TMP_PWR_ON_Pin */
+  GPIO_InitStruct.Pin = LED2_Pin|Pedo_NSS_Pin|TMP_PWR_ON_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
