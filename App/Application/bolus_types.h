@@ -41,6 +41,28 @@ typedef enum
     BOLUS_HEALTH_CRITICAL
 } bolus_health_status_t;
 
+/*
+ * Bolus-defined BMA456 step-sensitivity scale.
+ *
+ * DEFAULT leaves the Bosch feature-engine step parameters unchanged.
+ * Levels 1..7 are calibration profiles that can later be changed through
+ * runtime configuration / downlink.
+ *
+ * Level 1 = most robust / least sensitive
+ * Level 7 = most sensitive / highest false-detection risk
+ */
+typedef enum
+{
+    BOLUS_BMA_STEP_SENSITIVITY_DEFAULT = 0,
+    BOLUS_BMA_STEP_SENSITIVITY_LEVEL_1,
+    BOLUS_BMA_STEP_SENSITIVITY_LEVEL_2,
+    BOLUS_BMA_STEP_SENSITIVITY_LEVEL_3,
+    BOLUS_BMA_STEP_SENSITIVITY_LEVEL_4,
+    BOLUS_BMA_STEP_SENSITIVITY_LEVEL_5,
+    BOLUS_BMA_STEP_SENSITIVITY_LEVEL_6,
+    BOLUS_BMA_STEP_SENSITIVITY_LEVEL_7
+} bolus_bma_step_sensitivity_t;
+
 /* Sensor/data validity bitmap. */
 typedef uint32_t bolus_validity_flags_t;
 
@@ -49,20 +71,30 @@ typedef uint32_t bolus_validity_flags_t;
 #define BOLUS_VALID_BMA_MOTION       (1UL << 2)
 #define BOLUS_VALID_MPU_ORIENTATION  (1UL << 3)
 #define BOLUS_VALID_MPU_ROTATION     (1UL << 4)
+#define BOLUS_VALID_BMA_STEP         (1UL << 5)
 
 /* Fault masks are defined by Fault Manager; telemetry only transports them. */
 typedef uint32_t bolus_fault_mask_t;
 
 /*
  * Low-power continuous motion summary from BMA456.
- * Values are deliberately engineering-unit based so higher layers do not
- * depend on BMA456 register encoding.
+ *
+ * step_total is the native BMA456 hardware Step Counter output.
+ * step_delta is the unsigned difference from the previous successful read and
+ * is the primary candidate interval metric for gastric movement validation.
+ *
+ * The Step Counter output is not yet assumed to be a clinically validated
+ * rumen-contraction count; field validation determines that mapping.
  */
 typedef struct
 {
     int16_t accel_x_mg;
     int16_t accel_y_mg;
     int16_t accel_z_mg;
+
+    uint32_t step_total;
+    uint32_t step_delta;
+    bolus_bma_step_sensitivity_t step_sensitivity;
 
     uint16_t rms_motion_mg;
     uint16_t peak_motion_mg;

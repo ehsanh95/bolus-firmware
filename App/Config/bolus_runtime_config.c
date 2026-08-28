@@ -31,6 +31,14 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->bma.odr = BOLUS_BMA_ODR_12_5_HZ;
     config->bma.range_g = 4U;
     config->bma.averaging_samples = 4U;
+    config->bma.step_counter_enable = true;
+
+    /*
+     * Keep Bosch default step parameters until we intentionally choose a
+     * Bolus sensitivity profile during bench/field calibration.
+     */
+    config->bma.step_sensitivity = BOLUS_BMA_STEP_SENSITIVITY_DEFAULT;
+
     config->bma.fifo_enable = true;
     config->bma.motion_interrupt_enable = false;
 
@@ -102,6 +110,11 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
 
     if ((!IsPowerOfTwo(config->bma.averaging_samples)) ||
         (config->bma.averaging_samples > 64U))
+    {
+        return false;
+    }
+
+    if (config->bma.step_sensitivity > BOLUS_BMA_STEP_SENSITIVITY_LEVEL_7)
     {
         return false;
     }

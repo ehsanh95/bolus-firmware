@@ -15,7 +15,7 @@
  * Sensor/Radio service APIs.
  */
 
-#define BOLUS_RUNTIME_CONFIG_VERSION  1U
+#define BOLUS_RUNTIME_CONFIG_VERSION  2U
 
 typedef enum
 {
@@ -46,6 +46,14 @@ typedef struct
     bolus_bma_odr_t odr;
     uint8_t range_g;
     uint8_t averaging_samples;
+
+    /*
+     * The BMA456 stays powered during normal low-power operation.
+     * Its native Step Counter is a primary candidate gastric-movement metric.
+     */
+    bool step_counter_enable;
+    bolus_bma_step_sensitivity_t step_sensitivity;
+
     bool fifo_enable;
     bool motion_interrupt_enable;
 } bolus_bma_config_t;

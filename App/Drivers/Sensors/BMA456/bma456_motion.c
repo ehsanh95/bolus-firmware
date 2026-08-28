@@ -8,7 +8,22 @@
 
 static struct bma4_dev s_dev = {0};
 static bool s_ready = false;
+static bool s_step_counter_enabled = false;
 static uint8_t s_range_g = 4U;
+
+/*
+ * hiwdg is owned by main.c. Config-file upload is blocking enough that the
+ * watchdog must be serviced while the Bosch feature engine is initialized.
+ */
+extern IWDG_HandleTypeDef hiwdg;
+
+static void MotionServiceWatchdog(void)
+{
+    if (hiwdg.Instance == IWDG)
+    {
+        (void)HAL_IWDG_Refresh(&hiwdg);
+    }
+}
 
 static BMA4_INTF_RET_TYPE MotionSpiRead(
     uint8_t reg_addr,
@@ -25,6 +40,8 @@ static BMA4_INTF_RET_TYPE MotionSpiRead(
     {
         return (BMA4_INTF_RET_TYPE)1;
     }
+
+    MotionServiceWatchdog();
 
     HAL_GPIO_WritePin(Pedo_NSS_GPIO_Port, Pedo_NSS_Pin, GPIO_PIN_RESET);
 
@@ -64,6 +81,8 @@ static BMA4_INTF_RET_TYPE MotionSpiWrite(
         return (BMA4_INTF_RET_TYPE)1;
     }
 
+    MotionServiceWatchdog();
+
     HAL_GPIO_WritePin(Pedo_NSS_GPIO_Port, Pedo_NSS_Pin, GPIO_PIN_RESET);
 
     status = HAL_SPI_Transmit(
@@ -92,6 +111,8 @@ static void MotionDelayUs(uint32_t period_us, void *intf_ptr)
     uint32_t delay_ms;
 
     (void)intf_ptr;
+
+    MotionServiceWatchdog();
 
     if (period_us == 0U)
     {
@@ -209,11 +230,96 @@ static bool MapAveraging(uint8_t averaging_samples, uint8_t *bandwidth)
     }
 }
 
+static bool MapStepSensitivity(
+    uint8_t level,
+    uint16_t *param5,
+    uint16_t *param13)
+{
+    if ((param5 == NULL) || (param13 == NULL) ||
+        (level < 1U) || (level > 7U))
+    {
+        return false;
+    }
+
+    /*
+     * Bolus calibration scale derived from Bosch guidance:
+     * - Step parameter 5: 4 is most sensitive, 10 most robust.
+     * - Step parameter 13: 0 is more sensitive / more false detections,
+     *   1 is more robust / fewer false detections.
+     *
+     * Levels 1..7 are our product-level abstraction, not Bosch-defined names.
+     */
+    *param5 = (uint16_t)(11U - level);
+    *param13 = (level >= 5U) ? 0U : 1U;
+
+    return true;
+}
+
+static bma456_motion_status_t ConfigureStepCounter(
+    bool enable,
+    uint8_t sensitivity_level)
+{
+    struct bma456h_stepcounter_settings settings = {0};
+    uint16_t param5;
+    uint16_t param13;
+    int8_t result;
+
+    s_step_counter_enabled = false;
+
+    if (!enable)
+    {
+        return BMA456_MOTION_OK;
+    }
+
+    if (sensitivity_level > 7U)
+    {
+        return BMA456_MOTION_ERROR_CONFIG;
+    }
+
+    if (sensitivity_level != 0U)
+    {
+        if (!MapStepSensitivity(sensitivity_level, &param5, &param13))
+        {
+            return BMA456_MOTION_ERROR_CONFIG;
+        }
+
+        result = bma456h_stepcounter_get_parameter(&settings, &s_dev);
+        if (result != BMA4_OK)
+        {
+            return BMA456_MOTION_ERROR_CONFIG;
+        }
+
+        settings.param5 = param5;
+        settings.param13 = param13;
+
+        result = bma456h_stepcounter_set_parameter(&settings, &s_dev);
+        if (result != BMA4_OK)
+        {
+            return BMA456_MOTION_ERROR_CONFIG;
+        }
+    }
+
+    result = bma456h_feature_enable(
+        BMA456H_STEP_COUNTER_EN,
+        BMA4_ENABLE,
+        &s_dev);
+
+    if (result != BMA4_OK)
+    {
+        return BMA456_MOTION_ERROR_CONFIG;
+    }
+
+    s_step_counter_enabled = true;
+
+    return BMA456_MOTION_OK;
+}
+
 bma456_motion_status_t BMA456Motion_Init(
     SPI_HandleTypeDef *hspi,
     const bma456_motion_config_t *config)
 {
     struct bma4_accel_config accel_config = {0};
+    bma456_motion_status_t step_status;
     uint8_t bosch_odr;
     uint8_t bosch_range;
     uint8_t bosch_bandwidth;
@@ -226,12 +332,14 @@ bma456_motion_status_t BMA456Motion_Init(
 
     if ((!MapOdr(config->odr, &bosch_odr)) ||
         (!MapRange(config->range_g, &bosch_range)) ||
-        (!MapAveraging(config->averaging_samples, &bosch_bandwidth)))
+        (!MapAveraging(config->averaging_samples, &bosch_bandwidth)) ||
+        (config->step_sensitivity_level > 7U))
     {
         return BMA456_MOTION_ERROR_CONFIG;
     }
 
     s_ready = false;
+    s_step_counter_enabled = false;
     s_dev = (struct bma4_dev){0};
 
     s_dev.intf = BMA4_SPI_INTF;
@@ -251,6 +359,13 @@ bma456_motion_status_t BMA456Motion_Init(
         return BMA456_MOTION_ERROR_COMM;
     }
 
+    /* Required before using the BMA456H feature engine / Step Counter. */
+    result = bma456h_write_config_file(&s_dev);
+    if (result != BMA4_OK)
+    {
+        return BMA456_MOTION_ERROR_CONFIG;
+    }
+
     accel_config.odr = bosch_odr;
     accel_config.bandwidth = bosch_bandwidth;
     accel_config.perf_mode = BMA4_CIC_AVG_MODE;
@@ -268,9 +383,18 @@ bma456_motion_status_t BMA456Motion_Init(
         return BMA456_MOTION_ERROR_COMM;
     }
 
+    step_status = ConfigureStepCounter(
+        config->step_counter_enable,
+        config->step_sensitivity_level);
+
+    if (step_status != BMA456_MOTION_OK)
+    {
+        return step_status;
+    }
+
     /*
-     * Advanced power save is part of the low-power strategy. FIFO and
-     * interrupt configuration are added in the next incremental step.
+     * Advanced power save is part of the always-on low-power BMA strategy.
+     * FIFO and interrupt configuration are added incrementally later.
      */
     result = bma4_set_advance_power_save(BMA4_ENABLE, &s_dev);
     if (result != BMA4_OK)
@@ -309,10 +433,7 @@ bma456_motion_status_t BMA456Motion_ReadAccelMg(
         return BMA456_MOTION_ERROR_COMM;
     }
 
-    /*
-     * 16-bit signed full scale spans +/-range_g.
-     * mg = raw * range_g * 1000 / 32768.
-     */
+    /* 16-bit signed full scale spans +/-range_g. */
     scale_numerator = (int32_t)s_range_g * 1000;
 
     *x_mg = (int16_t)(((int32_t)raw.x * scale_numerator) / 32768);
@@ -322,7 +443,33 @@ bma456_motion_status_t BMA456Motion_ReadAccelMg(
     return BMA456_MOTION_OK;
 }
 
+bma456_motion_status_t BMA456Motion_ReadStepCount(
+    uint32_t *step_count)
+{
+    int8_t result;
+
+    if (step_count == NULL)
+    {
+        return BMA456_MOTION_ERROR_PARAM;
+    }
+
+    if ((!s_ready) || (!s_step_counter_enabled))
+    {
+        return BMA456_MOTION_ERROR_NOT_READY;
+    }
+
+    result = bma456h_step_counter_output(step_count, &s_dev);
+
+    return (result == BMA4_OK) ?
+        BMA456_MOTION_OK : BMA456_MOTION_ERROR_COMM;
+}
+
 bool BMA456Motion_IsReady(void)
 {
     return s_ready;
+}
+
+bool BMA456Motion_IsStepCounterEnabled(void)
+{
+    return s_ready && s_step_counter_enabled;
 }

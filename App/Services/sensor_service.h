@@ -21,7 +21,11 @@ typedef struct
     int16_t x_mg;
     int16_t y_mg;
     int16_t z_mg;
-} sensor_service_accel_sample_t;
+
+    uint32_t step_total;
+    uint32_t step_delta;
+    bolus_bma_step_sensitivity_t step_sensitivity;
+} sensor_service_bma_sample_t;
 
 /*
  * Phase 5 incremental BMA entry point.
@@ -32,7 +36,7 @@ sensor_service_status_t SensorService_InitBma(
     const bolus_runtime_config_t *config);
 
 sensor_service_status_t SensorService_ReadBmaSample(
-    sensor_service_accel_sample_t *sample);
+    sensor_service_bma_sample_t *sample);
 
 bool SensorService_IsBmaReady(void);
 

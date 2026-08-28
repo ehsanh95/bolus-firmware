@@ -27,6 +27,14 @@ typedef struct
     bma456_motion_odr_t odr;
     uint8_t range_g;
     uint8_t averaging_samples;
+
+    bool step_counter_enable;
+
+    /*
+     * 0 = keep Bosch default step-counter parameters.
+     * 1..7 = Bolus calibration scale; 1 is most robust, 7 most sensitive.
+     */
+    uint8_t step_sensitivity_level;
 } bma456_motion_config_t;
 
 typedef enum
@@ -49,6 +57,11 @@ bma456_motion_status_t BMA456Motion_ReadAccelMg(
     int16_t *y_mg,
     int16_t *z_mg);
 
+/* Read native BMA456 hardware Step Counter output. */
+bma456_motion_status_t BMA456Motion_ReadStepCount(
+    uint32_t *step_count);
+
 bool BMA456Motion_IsReady(void);
+bool BMA456Motion_IsStepCounterEnabled(void);
 
 #endif /* BMA456_MOTION_H */
