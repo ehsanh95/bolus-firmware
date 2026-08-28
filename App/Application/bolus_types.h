@@ -88,7 +88,13 @@ typedef struct
 typedef struct
 {
     int32_t temperature_mdeg_c;
+
+    /*
+     * Battery voltage and estimated state-of-charge are both telemetry data.
+     * battery_percent is an estimate and depends on the active battery model.
+     */
     uint16_t battery_mv;
+    uint8_t battery_percent;
 
     bolus_bma_motion_t bma;
     bolus_mpu_motion_t mpu;
