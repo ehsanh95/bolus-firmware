@@ -4,6 +4,132 @@
 #include "main.h"
 
 /*
+ * BOLUS PROJECT MODIFICATION
+ *
+ * Required by RADIO_MEMCPY8 and RADIO_MEMSET8
+ * used by the SX1276 driver.
+ */
+#include <string.h>
+
+/*
+ * ============================================================
+ * RFM95W / SX1276 CONFIGURATION
+ * ============================================================
+ *
+ * Bolus project configuration for the RFM95W radio module.
+ *
+ * The RFM95W is based on the Semtech SX1276 transceiver.
+ * ST middleware-specific configuration dependencies are not
+ * used in this project.
+ * ============================================================
+ */
+
+/*
+ * ------------------------------------------------------------
+ * Device identification
+ * ------------------------------------------------------------
+ *
+ * SX1276 RegVersion address = 0x42
+ * Expected value           = 0x12
+ */
+#define RFM95W_REG_VERSION                 0x42U
+#define RFM95W_EXPECTED_VERSION            0x12U
+
+
+/*
+ * ------------------------------------------------------------
+ * SPI interface
+ * ------------------------------------------------------------
+ */
+#define RFM95W_SPI_TIMEOUT_MS              100U
+
+
+/*
+ * ------------------------------------------------------------
+ * Power and reset timing
+ * ------------------------------------------------------------
+ */
+#define RFM95W_POWERUP_DELAY_MS            10U
+
+#define RFM95W_RESET_ASSERT_TIME_MS        1U
+#define RFM95W_RESET_RELEASE_TIME_MS       6U
+
+
+/*
+ * ------------------------------------------------------------
+ * Default RF configuration
+ * ------------------------------------------------------------
+ *
+ * Initial values for Phase 4 bring-up.
+ * These may be changed later according to the final radio
+ * protocol and regional frequency plan.
+ */
+#define RFM95W_DEFAULT_FREQUENCY_HZ        868000000UL
+
+#define RFM95W_DEFAULT_TX_POWER_DBM        10
+
+/*
+ * Semtech LoRa bandwidth index:
+ *
+ * 0 = 125 kHz
+ * 1 = 250 kHz
+ * 2 = 500 kHz
+ */
+#define RFM95W_DEFAULT_BANDWIDTH           0U
+
+#define RFM95W_DEFAULT_SPREADING_FACTOR    7U
+
+/*
+ * Coding rate:
+ *
+ * 1 = 4/5
+ * 2 = 4/6
+ * 3 = 4/7
+ * 4 = 4/8
+ */
+#define RFM95W_DEFAULT_CODING_RATE         1U
+
+#define RFM95W_DEFAULT_PREAMBLE_LENGTH     8U
+
+
+/*
+ * ------------------------------------------------------------
+ * ST SX1276 middleware adaptation
+ * ------------------------------------------------------------
+ *
+ * The original ST radio_conf.h maps these functions to the
+ * STM32 middleware utility layer.
+ *
+ * Bolus uses STM32 HAL and standard C library directly.
+ */
+
+/* Delay interface */
+#define RADIO_DELAY_MS(ms)                 HAL_Delay((ms))
+
+/* Memory set interface */
+#define RADIO_MEMSET8(dest, value, size)   \
+    memset((dest), (value), (size))
+
+/* Memory copy interface */
+#define RADIO_MEMCPY8(dest, src, size)     \
+    memcpy((dest), (src), (size))
+
+
+
+/*
+ * ------------------------------------------------------------
+ * end
+ * ------------------------------------------------------------
+ *
+ */
+
+
+
+
+
+
+
+/*
  * Power gate polarity
  * Current project documentation indicates the P-MOS power gates
  * are generally active-low.
@@ -126,8 +252,6 @@
  * Delay after sensor initialization.
  */
 #define TMP117_INIT_DELAY_MS            100U
-
-#endif
 /* ============================================================
  * MPU6050 Configuration
  * ============================================================ */
@@ -222,3 +346,4 @@
  * We keep the capability for now.
  */
 #define USE_KALMAN_FILTER               1
+#endif /* BOLUS_CONFIG_H */

@@ -63,6 +63,8 @@ void Error_Handler(void);
 #define RFM_RST_GPIO_Port GPIOA
 #define LED3_Pin GPIO_PIN_1
 #define LED3_GPIO_Port GPIOA
+#define RFM95W_NSS_Pin GPIO_PIN_4
+#define RFM95W_NSS_GPIO_Port GPIOA
 #define RFM_PWR_ON_Pin GPIO_PIN_4
 #define RFM_PWR_ON_GPIO_Port GPIOC
 #define LED2_Pin GPIO_PIN_0

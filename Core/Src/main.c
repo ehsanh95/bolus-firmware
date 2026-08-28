@@ -28,6 +28,10 @@
 #include "tmp117.h"
 #include "MPU6050.h"
 #include "bma456h.h"
+#include "rfm95w_board.h"
+#include "timer.h"
+#include "radio.h"
+#include "sx1276.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -60,11 +64,49 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
+/*
+ * ============================================================
+ * Existing application diagnostics/state
+ * ============================================================
+ */
+
 uint32_t reset_flags = 0U;
 
 battery_status_t battery_status;
 
 GPIO_PinState last_button_state = GPIO_PIN_SET;
+
+/*
+ * ============================================================
+ * RFM95W / SX1276 Phase 4 final validation
+ * ============================================================
+ */
+
+static RadioEvents_t rfm95w_radio_events = {0};
+
+uint32_t rfm95w_wakeup_time_ms = 0U;
+
+uint8_t rfm95w_version_after_init = 0U;
+
+uint8_t rfm95w_opmode_sleep = 0U;
+uint8_t rfm95w_opmode_stby  = 0U;
+
+uint8_t rfm95w_frf_msb = 0U;
+uint8_t rfm95w_frf_mid = 0U;
+uint8_t rfm95w_frf_lsb = 0U;
+
+uint32_t rfm95w_frf_actual = 0U;
+uint32_t rfm95w_frf_expected = 0U;
+
+RadioState_t rfm95w_state_after_init = RF_IDLE;
+
+HAL_StatusTypeDef rfm95w_final_spi_status = HAL_ERROR;
+
+bool rfm95w_init_ok = false;
+bool rfm95w_sleep_ok = false;
+bool rfm95w_stby_ok = false;
+bool rfm95w_freq_ok = false;
+bool rfm95w_final_ok = false;
 
 
 /* ============================================================
@@ -291,6 +333,8 @@ int main(void)
   FaultManager_Init();
 
 
+
+
   /* ============================================================
    * Battery driver initialization
    * ============================================================ */
@@ -468,6 +512,206 @@ int main(void)
               &bma456_step_count);
   }
 
+  /*
+   * ============================================================
+   * RFM95W / SX1276 Phase 4 FINAL TEST
+   * ============================================================
+   *
+   * This test performs no RF transmission.
+   *
+   * Validates:
+   *  - Power
+   *  - Full SX1276 initialization
+   *  - SPI communication
+   *  - Sleep mode
+   *  - Standby mode
+   *  - Frequency programming
+   * ============================================================
+   */
+
+
+  /* ------------------------------------------------------------
+   * 1. Power ON RFM95W
+   * ------------------------------------------------------------
+   */
+
+  BolusPower_On(
+      BOLUS_POWER_RFM95W);
+
+  HAL_Delay(
+      RFM95W_POWERUP_DELAY_MS);
+
+
+  /* ------------------------------------------------------------
+   * 2. Prepare SPI / NSS
+   * ------------------------------------------------------------
+   */
+
+  Sx_Board_Bus_Init();
+
+  Sx_Board_IoInit();
+
+
+  /* ------------------------------------------------------------
+   * 3. Full SX1276 initialization
+   * ------------------------------------------------------------
+   */
+
+  HAL_IWDG_Refresh(
+      &hiwdg);
+
+  rfm95w_wakeup_time_ms =
+      SX1276Init(
+          &rfm95w_radio_events);
+
+  HAL_IWDG_Refresh(
+      &hiwdg);
+
+
+  /* ------------------------------------------------------------
+   * 4. Verify RegVersion after full init
+   * ------------------------------------------------------------
+   */
+
+  rfm95w_version_after_init =
+      SX1276Read(
+          RFM95W_REG_VERSION);
+
+  rfm95w_state_after_init =
+      SX1276GetStatus();
+
+
+  rfm95w_init_ok =
+      ((rfm95w_version_after_init ==
+        RFM95W_EXPECTED_VERSION) &&
+       (rfm95w_state_after_init ==
+        RF_IDLE));
+
+
+  /* ------------------------------------------------------------
+   * 5. Select LoRa modem
+   * ------------------------------------------------------------
+   */
+
+  SX1276SetModem(
+      MODEM_LORA);
+
+
+  /* ------------------------------------------------------------
+   * 6. Sleep test
+   * ------------------------------------------------------------
+   */
+
+  SX1276SetSleep();
+
+  HAL_Delay(2U);
+
+  rfm95w_opmode_sleep =
+      SX1276Read(
+          REG_OPMODE);
+
+
+  rfm95w_sleep_ok =
+      (((rfm95w_opmode_sleep & 0x80U) != 0U) &&
+       ((rfm95w_opmode_sleep & 0x07U) ==
+        RF_OPMODE_SLEEP));
+
+
+  /* ------------------------------------------------------------
+   * 7. Standby test
+   * ------------------------------------------------------------
+   */
+
+  SX1276SetStby();
+
+  HAL_Delay(2U);
+
+  rfm95w_opmode_stby =
+      SX1276Read(
+          REG_OPMODE);
+
+
+  rfm95w_stby_ok =
+      (((rfm95w_opmode_stby & 0x80U) != 0U) &&
+       ((rfm95w_opmode_stby & 0x07U) ==
+        RF_OPMODE_STANDBY));
+
+
+  /* ------------------------------------------------------------
+   * 8. Program 868 MHz
+   * ------------------------------------------------------------
+   */
+
+  SX1276SetChannel(
+      RFM95W_DEFAULT_FREQUENCY_HZ);
+
+
+  /* Read FRF registers back */
+  rfm95w_frf_msb =
+      SX1276Read(
+          REG_FRFMSB);
+
+  rfm95w_frf_mid =
+      SX1276Read(
+          REG_FRFMID);
+
+  rfm95w_frf_lsb =
+      SX1276Read(
+          REG_FRFLSB);
+
+
+  /* Reconstruct 24-bit FRF value */
+  rfm95w_frf_actual =
+      ((uint32_t)rfm95w_frf_msb << 16) |
+      ((uint32_t)rfm95w_frf_mid << 8)  |
+      ((uint32_t)rfm95w_frf_lsb);
+
+
+  /*
+   * SX1276:
+   *
+   * FRF = Frequency * 2^19 / 32 MHz
+   */
+  rfm95w_frf_expected =
+      (uint32_t)
+      ((((uint64_t)
+         RFM95W_DEFAULT_FREQUENCY_HZ)
+        << 19) /
+       32000000ULL);
+
+
+  rfm95w_freq_ok =
+      (rfm95w_frf_actual ==
+       rfm95w_frf_expected);
+
+
+  /* ------------------------------------------------------------
+   * 9. SPI diagnostic
+   * ------------------------------------------------------------
+   */
+
+  rfm95w_final_spi_status =
+      RFM95W_Board_GetLastSpiStatus();
+
+
+  /* ------------------------------------------------------------
+   * 10. FINAL RESULT
+   * ------------------------------------------------------------
+   */
+
+  rfm95w_final_ok =
+      (rfm95w_init_ok &&
+       rfm95w_sleep_ok &&
+       rfm95w_stby_ok &&
+       rfm95w_freq_ok &&
+       (rfm95w_final_spi_status ==
+        HAL_OK));
+
+
+  /*
+   * Leave radio in low-power state.
+   */
+  SX1276SetSleep();
 
   /* USER CODE END 2 */
 
@@ -479,6 +723,14 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+	  /*
+	   * ============================================================
+	   * SX1276 cooperative timer service
+	   * ============================================================
+	   */
+	  TimerProcess();
+
 	  /*
 	   * ------------------------------------------------------------
 	   * BMA456 Step Counter polling
@@ -1193,17 +1445,17 @@ static void MX_SPI1_Init(void)
   hspi1.Instance = SPI1;
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_4BIT;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_HARD_OUTPUT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
   hspi1.Init.CRCPolynomial = 7;
   hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  hspi1.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
   if (HAL_SPI_Init(&hspi1) != HAL_OK)
   {
     Error_Handler();
@@ -1243,7 +1495,7 @@ static void MX_SPI2_Init(void)
   hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
   hspi2.Init.CRCPolynomial = 7;
   hspi2.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi2.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  hspi2.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
   if (HAL_SPI_Init(&hspi2) != HAL_OK)
   {
     Error_Handler();
@@ -1310,6 +1562,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOA, RFM_RST_Pin|LED3_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, RFM95W_NSS_Pin|MPU_PWR_ON_Pin|MCU_BCK_PWR_ON_Pin|SOC_CHK_ON_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, RFM_PWR_ON_Pin|PEDO_PWR_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
@@ -1321,19 +1576,16 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, Main_Reg_PWR_ON_Pin|LED1_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, MPU_PWR_ON_Pin|MCU_BCK_PWR_ON_Pin|SOC_CHK_ON_Pin, GPIO_PIN_SET);
-
   /*Configure GPIO pins : TMP_INT_Pin PEDO_INT2_Pin PEDO_INT1_Pin */
   GPIO_InitStruct.Pin = TMP_INT_Pin|PEDO_INT2_Pin|PEDO_INT1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : RFM_RST_Pin LED3_Pin MPU_PWR_ON_Pin MCU_BCK_PWR_ON_Pin
-                           SOC_CHK_ON_Pin */
-  GPIO_InitStruct.Pin = RFM_RST_Pin|LED3_Pin|MPU_PWR_ON_Pin|MCU_BCK_PWR_ON_Pin
-                          |SOC_CHK_ON_Pin;
+  /*Configure GPIO pins : RFM_RST_Pin LED3_Pin RFM95W_NSS_Pin MPU_PWR_ON_Pin
+                           MCU_BCK_PWR_ON_Pin SOC_CHK_ON_Pin */
+  GPIO_InitStruct.Pin = RFM_RST_Pin|LED3_Pin|RFM95W_NSS_Pin|MPU_PWR_ON_Pin
+                          |MCU_BCK_PWR_ON_Pin|SOC_CHK_ON_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
