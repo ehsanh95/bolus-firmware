@@ -9,7 +9,7 @@
 static struct bma4_dev s_dev = {0};
 static bool s_ready = false;
 static bool s_step_counter_enabled = false;
-static uint8_t s_range_g = 4U;
+static uint8_t s_range_g = 2U;
 
 /*
  * hiwdg is owned by main.c. Config-file upload is blocking enough that the
@@ -230,6 +230,36 @@ static bool MapAveraging(uint8_t averaging_samples, uint8_t *bandwidth)
     }
 }
 
+static bool BoschRangeToG(uint8_t bosch_range, uint8_t *range_g)
+{
+    if (range_g == NULL)
+    {
+        return false;
+    }
+
+    switch (bosch_range)
+    {
+        case BMA4_ACCEL_RANGE_2G:
+            *range_g = 2U;
+            return true;
+
+        case BMA4_ACCEL_RANGE_4G:
+            *range_g = 4U;
+            return true;
+
+        case BMA4_ACCEL_RANGE_8G:
+            *range_g = 8U;
+            return true;
+
+        case BMA4_ACCEL_RANGE_16G:
+            *range_g = 16U;
+            return true;
+
+        default:
+            return false;
+    }
+}
+
 static bool MapStepSensitivity(
     uint8_t level,
     uint16_t *param5,
@@ -340,6 +370,7 @@ bma456_motion_status_t BMA456Motion_Init(
 
     s_ready = false;
     s_step_counter_enabled = false;
+    s_range_g = 2U;
     s_dev = (struct bma4_dev){0};
 
     s_dev.intf = BMA4_SPI_INTF;
@@ -359,22 +390,38 @@ bma456_motion_status_t BMA456Motion_Init(
         return BMA456_MOTION_ERROR_COMM;
     }
 
-    /* Required before using the BMA456H feature engine / Step Counter. */
     result = bma456h_write_config_file(&s_dev);
     if (result != BMA4_OK)
     {
         return BMA456_MOTION_ERROR_CONFIG;
     }
 
-    accel_config.odr = bosch_odr;
-    accel_config.bandwidth = bosch_bandwidth;
-    accel_config.perf_mode = BMA4_CIC_AVG_MODE;
-    accel_config.range = bosch_range;
-
-    result = bma4_set_accel_config(&accel_config, &s_dev);
-    if (result != BMA4_OK)
+    /*
+     * IMPORTANT PHASE-5 BENCH BASELINE
+     * --------------------------------
+     * When Step Counter is enabled, preserve the same accelerometer setup used
+     * by the proven Phase-4 wrapper and Bosch step-counter example:
+     *
+     *     init -> config-file -> accel-enable -> step-enable
+     *
+     * We intentionally do not override ODR/bandwidth/range and do not enable
+     * advanced power-save on this path yet. The previous 12.5 Hz / AVG4 /
+     * advanced-power-save experiment returned valid XYZ but a Step Counter
+     * stuck at zero. Low-power tuning will be reintroduced one variable at a
+     * time after the hardware Step Counter baseline passes again.
+     */
+    if (!config->step_counter_enable)
     {
-        return BMA456_MOTION_ERROR_CONFIG;
+        accel_config.odr = bosch_odr;
+        accel_config.bandwidth = bosch_bandwidth;
+        accel_config.perf_mode = BMA4_CIC_AVG_MODE;
+        accel_config.range = bosch_range;
+
+        result = bma4_set_accel_config(&accel_config, &s_dev);
+        if (result != BMA4_OK)
+        {
+            return BMA456_MOTION_ERROR_CONFIG;
+        }
     }
 
     result = bma4_set_accel_enable(BMA4_ENABLE, &s_dev);
@@ -392,17 +439,27 @@ bma456_motion_status_t BMA456Motion_Init(
         return step_status;
     }
 
+    if (!config->step_counter_enable)
+    {
+        result = bma4_set_advance_power_save(BMA4_ENABLE, &s_dev);
+        if (result != BMA4_OK)
+        {
+            return BMA456_MOTION_ERROR_CONFIG;
+        }
+    }
+
     /*
-     * Advanced power save is part of the always-on low-power BMA strategy.
-     * FIFO and interrupt configuration are added incrementally later.
+     * Read back the range actually active in silicon so XYZ conversion remains
+     * correct even while the Step Counter path intentionally keeps Bosch's
+     * known-good default accelerometer configuration.
      */
-    result = bma4_set_advance_power_save(BMA4_ENABLE, &s_dev);
-    if (result != BMA4_OK)
+    result = bma4_get_accel_config(&accel_config, &s_dev);
+    if ((result != BMA4_OK) ||
+        (!BoschRangeToG(accel_config.range, &s_range_g)))
     {
         return BMA456_MOTION_ERROR_CONFIG;
     }
 
-    s_range_g = config->range_g;
     s_ready = true;
 
     return BMA456_MOTION_OK;
@@ -433,7 +490,6 @@ bma456_motion_status_t BMA456Motion_ReadAccelMg(
         return BMA456_MOTION_ERROR_COMM;
     }
 
-    /* 16-bit signed full scale spans +/-range_g. */
     scale_numerator = (int32_t)s_range_g * 1000;
 
     *x_mg = (int16_t)(((int32_t)raw.x * scale_numerator) / 32768);
