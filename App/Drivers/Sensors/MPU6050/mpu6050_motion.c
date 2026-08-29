@@ -2,6 +2,8 @@
 
 #include "bolus_config.h"
 
+#include <math.h>
+
 #define MPU6050_MOTION_WHO_AM_I_REG       0x75U
 #define MPU6050_MOTION_PWR_MGMT_1_REG     0x6BU
 #define MPU6050_MOTION_SMPLRT_DIV_REG     0x19U
@@ -13,11 +15,85 @@
 #define MPU6050_MOTION_WHO_AM_I_VALUE     0x68U
 #define MPU6050_MOTION_DLPF_CFG           0x03U
 #define MPU6050_MOTION_GYRO_SETTLE_MS     30U
+#define MPU6050_MOTION_RAD_TO_DEG         57.29577951308232
+
+/*
+ * Phase-5 orientation bench diagnostics.
+ *
+ * Roll/pitch/tilt are derived from the gravity vector, so they are meaningful
+ * when the bolus is stationary or moving slowly enough that linear acceleration
+ * is small compared with 1 g.  Absolute yaw/compass heading is intentionally
+ * marked unavailable: MPU6050 has no magnetometer, so gravity alone cannot
+ * observe rotation about the vertical axis.
+ */
+bool mpu6050_diag_orientation_valid = false;
+int32_t mpu6050_diag_roll_mdeg = 0;
+int32_t mpu6050_diag_pitch_mdeg = 0;
+int32_t mpu6050_diag_tilt_mdeg = 0;
+bool mpu6050_diag_absolute_yaw_available = false;
 
 static I2C_HandleTypeDef *s_hi2c = NULL;
 static bool s_ready = false;
 static uint16_t s_accel_lsb_per_g = 8192U;
 static uint16_t s_gyro_lsb_per_dps_x10 = 655U;
+
+static int32_t DegreesToMilliDegrees(double degrees)
+{
+    double scaled = degrees * 1000.0;
+
+    if (scaled >= 0.0)
+    {
+        return (int32_t)(scaled + 0.5);
+    }
+
+    return (int32_t)(scaled - 0.5);
+}
+
+static void UpdateOrientationDiagnostics(
+    int16_t accel_x_mg,
+    int16_t accel_y_mg,
+    int16_t accel_z_mg)
+{
+    double ax = (double)accel_x_mg;
+    double ay = (double)accel_y_mg;
+    double az = (double)accel_z_mg;
+    double norm_mg = sqrt((ax * ax) + (ay * ay) + (az * az));
+    double roll_deg;
+    double pitch_deg;
+    double tilt_deg;
+
+    mpu6050_diag_orientation_valid =
+        ((norm_mg >= 700.0) && (norm_mg <= 1300.0));
+
+    if (norm_mg < 1.0)
+    {
+        mpu6050_diag_roll_mdeg = 0;
+        mpu6050_diag_pitch_mdeg = 0;
+        mpu6050_diag_tilt_mdeg = 0;
+        mpu6050_diag_orientation_valid = false;
+        return;
+    }
+
+    /*
+     * Board-frame convention:
+     *   roll  : rotation about +X
+     *   pitch : rotation about +Y
+     *   tilt  : angle between +Z and the gravity/acceleration vector
+     *
+     * These signs are intentionally bench-validated before they become a
+     * telemetry contract because final enclosure PCB orientation may require
+     * an axis remap.
+     */
+    roll_deg = atan2(ay, az) * MPU6050_MOTION_RAD_TO_DEG;
+    pitch_deg = atan2(-ax, sqrt((ay * ay) + (az * az))) *
+                MPU6050_MOTION_RAD_TO_DEG;
+    tilt_deg = atan2(sqrt((ax * ax) + (ay * ay)), az) *
+               MPU6050_MOTION_RAD_TO_DEG;
+
+    mpu6050_diag_roll_mdeg = DegreesToMilliDegrees(roll_deg);
+    mpu6050_diag_pitch_mdeg = DegreesToMilliDegrees(pitch_deg);
+    mpu6050_diag_tilt_mdeg = DegreesToMilliDegrees(tilt_deg);
+}
 
 static bool WriteReg(uint8_t reg, uint8_t value)
 {
@@ -311,6 +387,7 @@ mpu6050_motion_status_t MPU6050Motion_ReadSample(
 
     if (hal_status != HAL_OK)
     {
+        mpu6050_diag_orientation_valid = false;
         return MPU6050_MOTION_ERROR_COMM;
     }
 
@@ -338,6 +415,11 @@ mpu6050_motion_status_t MPU6050Motion_ReadSample(
 
     sample->temperature_mdeg_c =
         (((int32_t)temp_raw * 1000L) / 340L) + 36530L;
+
+    UpdateOrientationDiagnostics(
+        sample->accel_x_mg,
+        sample->accel_y_mg,
+        sample->accel_z_mg);
 
     return MPU6050_MOTION_OK;
 }
