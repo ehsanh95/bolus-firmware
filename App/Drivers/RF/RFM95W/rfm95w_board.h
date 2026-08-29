@@ -22,6 +22,7 @@ extern "C" {
 #endif
 
 #include "main.h"
+#include "bolus_config.h"
 
 #include <stdint.h>
 #include <stdbool.h>
