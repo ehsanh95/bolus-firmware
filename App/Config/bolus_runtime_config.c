@@ -79,7 +79,7 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->bma.step_sensitivity = BOLUS_BMA_STEP_SENSITIVITY_DEFAULT;
 
     config->bma.fifo_enable = true;
-    config->bma.motion_interrupt_enable = false;
+    config->bma.motion_interrupt_enable = true;
 
     /* MPU6050: short detailed burst; event triggering is enabled later. */
     config->mpu.scheduled_period_s = 900U;
@@ -94,6 +94,10 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
      * They are intentionally kept in RuntimeConfig so future downlink/field
      * calibration replaces values without rewriting the classifier.
      *
+     * BMA Any-Motion:
+     * - threshold/duration 0 means preserve the Bosch feature-image settings.
+     *   We read those settings back during the bench instead of inventing a
+     *   cattle-specific interrupt threshold before field calibration.
      * Drinking:
      * - published fall methods use 0.5 C / 5 min and 0.5 C / 10 min scales.
      * Contractions:
@@ -106,8 +110,10 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->event_processing.rule_source =
         BOLUS_EVENT_RULES_REFERENCE_BENCHMARK;
 
-    /* Separate from Step Counter sensitivity; mapping is field-calibrated. */
+    /* Separate from Step Counter sensitivity. */
     config->event_processing.bma_event_sensitivity_level = 0U;
+    config->event_processing.bma_event_threshold_mg = 0U;
+    config->event_processing.bma_event_duration_ms = 0U;
     config->event_processing.bma_event_cooldown_s = 0U;
 
     config->event_processing.drinking_drop_5min_mdeg_c = 500U;
@@ -223,6 +229,27 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
     }
 
     if (config->event_processing.bma_event_sensitivity_level > 7U)
+    {
+        return false;
+    }
+
+    /*
+     * 0 keeps the Bosch feature-image setting. Otherwise Any-Motion threshold
+     * is expressed in mg and must remain in the Bosch 0..1 g domain.
+     */
+    if (config->event_processing.bma_event_threshold_mg > 1000U)
+    {
+        return false;
+    }
+
+    /*
+     * Bosch Any-Motion duration is expressed in 50-Hz samples (20 ms). Keep a
+     * bounded exact millisecond representation so downlink never requests a
+     * value the driver has to silently round.
+     */
+    if ((config->event_processing.bma_event_duration_ms != 0U) &&
+        (((config->event_processing.bma_event_duration_ms % 20U) != 0U) ||
+         (config->event_processing.bma_event_duration_ms > 60000U)))
     {
         return false;
     }
