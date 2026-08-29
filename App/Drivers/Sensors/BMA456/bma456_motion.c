@@ -6,6 +6,22 @@
 #define BMA456_MOTION_SPI_TIMEOUT_MS  20U
 #define BMA456_MOTION_MAX_TRANSFER    64U
 
+/*
+ * Phase-5 characterization diagnostics.
+ *
+ * These are intentionally non-static while BMA456 low-power behaviour is
+ * being characterized so they can be inspected directly in CubeIDE Live
+ * Expressions. They report the configuration actually read back from silicon,
+ * not merely the values requested through RuntimeConfig.
+ */
+bool bma456_diag_readback_valid = false;
+uint8_t bma456_diag_odr_code = 0U;
+uint8_t bma456_diag_bandwidth_code = 0U;
+uint8_t bma456_diag_perf_mode = 0U;
+uint8_t bma456_diag_range_code = 0U;
+uint8_t bma456_diag_range_g = 0U;
+uint8_t bma456_diag_advanced_power_save = 0xFFU;
+
 static struct bma4_dev s_dev = {0};
 static bool s_ready = false;
 static bool s_step_counter_enabled = false;
@@ -353,6 +369,7 @@ bma456_motion_status_t BMA456Motion_Init(
     uint8_t bosch_odr;
     uint8_t bosch_range;
     uint8_t bosch_bandwidth;
+    uint8_t advanced_power_save = 0xFFU;
     int8_t result;
 
     if ((hspi == NULL) || (config == NULL))
@@ -372,6 +389,14 @@ bma456_motion_status_t BMA456Motion_Init(
     s_step_counter_enabled = false;
     s_range_g = 2U;
     s_dev = (struct bma4_dev){0};
+
+    bma456_diag_readback_valid = false;
+    bma456_diag_odr_code = 0U;
+    bma456_diag_bandwidth_code = 0U;
+    bma456_diag_perf_mode = 0U;
+    bma456_diag_range_code = 0U;
+    bma456_diag_range_g = 0U;
+    bma456_diag_advanced_power_save = 0xFFU;
 
     s_dev.intf = BMA4_SPI_INTF;
     s_dev.bus_read = MotionSpiRead;
@@ -449,15 +474,31 @@ bma456_motion_status_t BMA456Motion_Init(
     }
 
     /*
-     * Read back the range actually active in silicon so XYZ conversion remains
-     * correct even while the Step Counter path intentionally keeps Bosch's
-     * known-good default accelerometer configuration.
+     * Read back the configuration actually active in silicon. This is the
+     * baseline for low-power characterization; no behaviour is changed by the
+     * diagnostic readback itself.
      */
     result = bma4_get_accel_config(&accel_config, &s_dev);
     if ((result != BMA4_OK) ||
         (!BoschRangeToG(accel_config.range, &s_range_g)))
     {
         return BMA456_MOTION_ERROR_CONFIG;
+    }
+
+    bma456_diag_odr_code = accel_config.odr;
+    bma456_diag_bandwidth_code = accel_config.bandwidth;
+    bma456_diag_perf_mode = accel_config.perf_mode;
+    bma456_diag_range_code = accel_config.range;
+    bma456_diag_range_g = s_range_g;
+
+    result = bma4_get_advance_power_save(
+        &advanced_power_save,
+        &s_dev);
+
+    if (result == BMA4_OK)
+    {
+        bma456_diag_advanced_power_save = advanced_power_save;
+        bma456_diag_readback_valid = true;
     }
 
     s_ready = true;
