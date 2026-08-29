@@ -41,7 +41,7 @@ event_processor_status_t EventProcessor_Evaluate(
 
     /*
      * Published drinking algorithms provide 0.5 C / 5 min and 0.5 C / 10 min
-     * fall scales. These are used here only as explicit reference matches.
+     * fall scales. These are the preferred literature-reference matches.
      * High-rate TMP117 thresholds must be field-calibrated before production.
      */
     drop_5min_threshold =
@@ -69,10 +69,34 @@ event_processor_status_t EventProcessor_Evaluate(
             result->flags |= EVENT_PROCESSOR_FLAG_TEMP_DROP_REFERENCE;
         }
 
+        /*
+         * A fixed 38.1 C rule exists in the published drinking literature, but
+         * it performed worse than trajectory-based methods and is therefore
+         * retained only as an independent secondary reference flag.
+         */
+        if (features->temperature_mdeg_c <=
+            config->event_processing.drinking_absolute_temp_reference_mdeg_c)
+        {
+            result->drinking_absolute_temp_reference_match = true;
+            result->flags |= EVENT_PROCESSOR_FLAG_DRINK_ABS_TEMP_REFERENCE;
+        }
+
+        /*
+         * These are health-risk/reference flags only. They intentionally do not
+         * produce fever/infection/SARA diagnoses.
+         */
         if (features->temperature_mdeg_c >=
             config->event_processing.hyperthermia_reference_mdeg_c)
         {
+            result->hyperthermia_reference_match = true;
             result->flags |= EVENT_PROCESSOR_FLAG_HYPERTHERMIA_REFERENCE;
+        }
+
+        if (features->temperature_mdeg_c >=
+            config->event_processing.sara_risk_reference_mdeg_c)
+        {
+            result->sara_risk_reference_match = true;
+            result->flags |= EVENT_PROCESSOR_FLAG_SARA_RISK_REFERENCE;
         }
     }
 
