@@ -34,11 +34,11 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->bma.step_counter_enable = true;
 
     /*
-     * Phase-5 bench characterization: exercise the middle Bolus sensitivity
+     * Phase-5 bench characterization: exercise the least-sensitive Bolus
      * profile while keeping the proven 12.5 Hz / continuous-mode step path.
-     * Field trials will later select the production profile through downlink.
+     * Compare its response with LEVEL_4 under similar hand-motion patterns.
      */
-    config->bma.step_sensitivity = BOLUS_BMA_STEP_SENSITIVITY_LEVEL_4;
+    config->bma.step_sensitivity = BOLUS_BMA_STEP_SENSITIVITY_LEVEL_1;
 
     config->bma.fifo_enable = true;
     config->bma.motion_interrupt_enable = false;
