@@ -10,7 +10,7 @@
  * Phase-5 controlled Step Counter characterization.
  * Only ODR is changed from the known-good Bosch/Phase-4 baseline.
  */
-#define BMA456_STEP_CHARACTERIZATION_ODR  BMA4_OUTPUT_DATA_RATE_12_5HZ
+#define BMA456_STEP_CHARACTERIZATION_ODR  BMA4_OUTPUT_DATA_RATE_6_25HZ
 
 /*
  * Phase-5 characterization diagnostics.
