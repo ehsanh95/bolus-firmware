@@ -27,7 +27,8 @@
 #include "battery.h"
 #include "tmp117.h"
 #include "MPU6050.h"
-#include "bma456h.h"
+#include "sensor_service.h"
+#include "bolus_runtime_config.h"
 #include "rfm95w_board.h"
 #include "timer.h"
 #include "radio.h"
@@ -167,14 +168,27 @@ uint8_t bma456_pwr_conf_2 = 0U;
 
 uint8_t bma456_chip_id_3 = 0U;
 
-/* BMA456 Step Counter test */
-int8_t bma456_init_result = BMA4_E_INVALID_STATUS;
-int8_t bma456_read_result = BMA4_E_INVALID_STATUS;
+/*
+ * ============================================================
+ * Phase 5 BMA456 SensorService bench variables
+ * ============================================================
+ *
+ * Keep these non-static while the Phase 5 BMA path is under bench validation
+ * so they are easy to inspect in CubeIDE Live Expressions.
+ */
+bolus_runtime_config_t bma456_service_config = {0};
 
-uint32_t bma456_step_count = 0U;
-uint32_t bma456_last_read_tick = 0U;
+sensor_service_status_t bma456_service_init_status =
+    SENSOR_SERVICE_ERROR_BMA_INIT;
 
-bool bma456_step_ready = false;
+sensor_service_status_t bma456_service_read_status =
+    SENSOR_SERVICE_ERROR_BMA_READ;
+
+sensor_service_bma_sample_t bma456_service_sample = {0};
+
+bool bma456_service_ready = false;
+
+uint32_t bma456_service_last_read_tick = 0U;
 
 /* USER CODE END PV */
 
@@ -372,7 +386,8 @@ int main(void)
    *      ↓
    * Read PWR_CONF
    *
-   * We are NOT using Bosch SensorAPI yet.
+   * This remains temporarily as a Phase 4 hardware sanity check before
+   * ownership passes to SensorService for the Phase 5 bench path below.
    * ============================================================
    */
 
@@ -491,25 +506,34 @@ int main(void)
 
   /*
    * ============================================================
-   * BMA456 Bosch SensorAPI Step Counter initialization
+   * Phase 5 BMA456 SensorService bench initialization
    * ============================================================
    *
-   * BMA456 power is already ON above.
-   * Raw SPI communication has already been validated.
+   * The legacy BMA456_Bolus_* Step Counter path is intentionally NOT started.
+   * SensorService now owns the active BMA456 software path so one Bosch device
+   * instance is responsible for XYZ + Step Counter data.
    */
+  BolusRuntimeConfig_LoadDefaults(
+      &bma456_service_config);
 
-  bma456_init_result =
-      BMA456_Bolus_InitStepCounter(
-          &hspi2);
+  bma456_service_init_status =
+      SensorService_InitBma(
+          &hspi2,
+          &bma456_service_config);
 
-  bma456_step_ready =
-      (bma456_init_result == BMA4_OK);
+  bma456_service_ready =
+      ((bma456_service_init_status == SENSOR_SERVICE_OK) &&
+       SensorService_IsBmaReady());
 
-  if (bma456_step_ready)
+  if (bma456_service_ready)
   {
-      bma456_read_result =
-          BMA456_Bolus_ReadStepCount(
-              &bma456_step_count);
+      /*
+       * First successful sample establishes the Step Counter baseline, so
+       * step_delta is expected to be 0 for this first acquisition.
+       */
+      bma456_service_read_status =
+          SensorService_ReadBmaSample(
+              &bma456_service_sample);
   }
 
   /*
@@ -733,21 +757,21 @@ int main(void)
 
 	  /*
 	   * ------------------------------------------------------------
-	   * BMA456 Step Counter polling
+	   * Phase 5 BMA456 SensorService bench polling
 	   * ------------------------------------------------------------
 	   *
-	   * Poll every 500 ms.
-	   * No BMA interrupt is used in Phase 4.
+	   * 500 ms is intentionally a bench/debug interval only. Production
+	   * acquisition will be event/RTC driven so the MCU can remain in STOP2.
 	   */
-	  if (bma456_step_ready)
+	  if (bma456_service_ready)
 	  {
-	      if ((HAL_GetTick() - bma456_last_read_tick) >= 500U)
+	      if ((HAL_GetTick() - bma456_service_last_read_tick) >= 500U)
 	      {
-	          bma456_last_read_tick = HAL_GetTick();
+	          bma456_service_last_read_tick = HAL_GetTick();
 
-	          bma456_read_result =
-	              BMA456_Bolus_ReadStepCount(
-	                  &bma456_step_count);
+	          bma456_service_read_status =
+	              SensorService_ReadBmaSample(
+	                  &bma456_service_sample);
 	      }
 	  }
 
