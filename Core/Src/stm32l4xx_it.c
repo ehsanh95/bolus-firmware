@@ -53,6 +53,17 @@
 
 volatile uint32_t iwdg_diag_systick_refresh_count = 0U;
 
+/*
+ * One-shot EXTI diagnostics for the current reset-loop investigation.
+ * If the BMA INT1 line is repeatedly retriggering at priority 5, it can starve
+ * lower-priority SysTick long enough for IWDG to reset the MCU. The diagnostic
+ * handler masks INT1 immediately on its first entry so we can prove or reject
+ * that hypothesis without changing the BMA feature configuration itself.
+ */
+volatile uint32_t bma_irq_diag_entry_count = 0U;
+volatile uint32_t bma_irq_diag_last_tick_ms = 0U;
+volatile uint8_t bma_irq_diag_int1_masked = 0U;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -230,15 +241,22 @@ void SysTick_Handler(void)
 /* USER CODE BEGIN 1 */
 
 /*
- * PC6/PEDO_INT2 and PC7/PEDO_INT1 share EXTI9_5. Phase 5 uses only INT1 for
- * BMA Any-Motion. INT2 was left configured as an EXTI input by CubeMX; once the
- * shared NVIC line was enabled, a noisy/floating INT2 could repeatedly wake
- * the CPU and starve the watchdog. Mask INT2 at the EXTI IMR and service only
- * INT1. The line can be re-enabled later when it has an explicit owner.
+ * PC6/PEDO_INT2 and PC7/PEDO_INT1 share EXTI9_5.
+ *
+ * DIAGNOSTIC MODE: mask BOTH lines immediately when the shared IRQ is entered.
+ * INT2 is unused already. INT1 is intentionally made one-shot for this bench
+ * test. If the reset loop disappears, the BMA INT1 path is retriggering fast
+ * enough to starve SysTick/IWDG. If the reset remains with entry_count == 0 or
+ * after INT1 is masked, the cause is elsewhere.
  */
 void EXTI9_5_IRQHandler(void)
 {
-  EXTI->IMR1 &= ~((uint32_t)PEDO_INT2_Pin);
+  bma_irq_diag_entry_count++;
+  bma_irq_diag_last_tick_ms = HAL_GetTick();
+
+  EXTI->IMR1 &= ~((uint32_t)(PEDO_INT2_Pin | PEDO_INT1_Pin));
+  bma_irq_diag_int1_masked = 1U;
+
   __HAL_GPIO_EXTI_CLEAR_IT(PEDO_INT2_Pin);
   HAL_GPIO_EXTI_IRQHandler(PEDO_INT1_Pin);
 }
