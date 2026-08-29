@@ -15,7 +15,7 @@
  * Sensor/Radio service APIs.
  */
 
-#define BOLUS_RUNTIME_CONFIG_VERSION  4U
+#define BOLUS_RUNTIME_CONFIG_VERSION  5U
 
 typedef enum
 {
@@ -104,9 +104,15 @@ typedef struct
     uint16_t bma_event_duration_ms;
     uint16_t bma_event_cooldown_s;
 
-    /* Published drinking trajectory reference values. */
+    /*
+     * Published drinking references.
+     * - trajectory rules are the preferred evidence path;
+     * - 38.1 C absolute temperature is retained only as a weaker secondary
+     *   published rule and must never override trajectory evidence.
+     */
     uint16_t drinking_drop_5min_mdeg_c;
     uint16_t drinking_drop_10min_mdeg_c;
+    int32_t drinking_absolute_temp_reference_mdeg_c;
 
     /* Direct intrareticular contraction timing evidence. */
     uint16_t contraction_duration_min_ms;
@@ -114,8 +120,13 @@ typedef struct
     uint16_t contraction_interval_min_s;
     uint16_t contraction_interval_max_s;
 
-    /* Cohort/study benchmark only; not a disease diagnosis threshold. */
+    /*
+     * Published health-risk references only. Neither value is a diagnosis.
+     * 40.0 C: cohort-level hyperthermia reference.
+     * 39.4 C: reported association with time at low ruminal pH / SARA risk.
+     */
     int32_t hyperthermia_reference_mdeg_c;
+    int32_t sara_risk_reference_mdeg_c;
 } bolus_event_processing_config_t;
 
 typedef struct
