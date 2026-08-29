@@ -41,6 +41,12 @@
  */
 #define BOLUS_IWDG_DIAG_SYSTICK_REFRESH_MS  100U
 
+#define BOLUS_FAULT_DIAG_NMI         1U
+#define BOLUS_FAULT_DIAG_HARDFAULT   2U
+#define BOLUS_FAULT_DIAG_MEMMANAGE   3U
+#define BOLUS_FAULT_DIAG_BUSFAULT    4U
+#define BOLUS_FAULT_DIAG_USAGEFAULT  5U
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -58,9 +64,7 @@ volatile uint32_t iwdg_diag_systick_refresh_count = 0U;
  *
  * EXTI line 5 belongs to RFM_DIO2 (PB5), line 6 to the currently unused
  * PEDO_INT2 (PC6), and line 7 to BMA456 PEDO_INT1 (PC7). They all share the
- * same NVIC vector. The previous bench handler serviced only lines 6/7, so a
- * pending radio DIO2 edge on line 5 could leave EXTI9_5 permanently pending
- * and starve lower-priority SysTick until IWDG reset the MCU.
+ * same NVIC vector.
  */
 volatile uint32_t exti9_5_diag_entry_count = 0U;
 volatile uint32_t rfm_dio2_diag_dispatch_count = 0U;
@@ -68,15 +72,75 @@ volatile uint32_t bma_irq_diag_entry_count = 0U;
 volatile uint32_t bma_irq_diag_last_tick_ms = 0U;
 volatile uint8_t bma_irq_diag_int1_masked = 0U;
 
+/*
+ * Cortex fault trap diagnostics.
+ *
+ * Previous fault handlers sat in an infinite loop with interrupts disabled.
+ * That stopped SysTick, so IWDG subsequently reset the MCU and erased the
+ * evidence from ordinary RAM. During this bench investigation the trap feeds
+ * IWDG directly and freezes in-place, allowing Live Expressions to reveal the
+ * exact exception and SCB fault registers.
+ */
+volatile uint32_t fault_diag_code = 0U;
+volatile uint32_t fault_diag_ipsr = 0U;
+volatile uint32_t fault_diag_cfsr = 0U;
+volatile uint32_t fault_diag_hfsr = 0U;
+volatile uint32_t fault_diag_shcsr = 0U;
+volatile uint32_t fault_diag_mmfar = 0U;
+volatile uint32_t fault_diag_bfar = 0U;
+volatile uint32_t fault_diag_afsr = 0U;
+volatile uint32_t fault_diag_icsr = 0U;
+volatile uint32_t fault_diag_msp = 0U;
+volatile uint32_t fault_diag_psp = 0U;
+volatile uint32_t fault_diag_control = 0U;
+volatile uint32_t fault_diag_primask = 0U;
+volatile uint32_t fault_diag_basepri = 0U;
+volatile uint32_t fault_diag_faultmask = 0U;
+volatile uint32_t fault_diag_trap_loop_count = 0U;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
 
+static void BolusDiag_FaultTrap(uint32_t code);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+static void BolusDiag_FaultTrap(uint32_t code)
+{
+  __disable_irq();
+
+  fault_diag_code = code;
+  fault_diag_ipsr = __get_IPSR();
+  fault_diag_cfsr = SCB->CFSR;
+  fault_diag_hfsr = SCB->HFSR;
+  fault_diag_shcsr = SCB->SHCSR;
+  fault_diag_mmfar = SCB->MMFAR;
+  fault_diag_bfar = SCB->BFAR;
+  fault_diag_afsr = SCB->AFSR;
+  fault_diag_icsr = SCB->ICSR;
+  fault_diag_msp = __get_MSP();
+  fault_diag_psp = __get_PSP();
+  fault_diag_control = __get_CONTROL();
+  fault_diag_primask = __get_PRIMASK();
+  fault_diag_basepri = __get_BASEPRI();
+  fault_diag_faultmask = __get_FAULTMASK();
+
+  for (;;)
+  {
+    /*
+     * Direct refresh intentionally avoids HAL/tick dependencies while trapped.
+     * If the board STILL resets from this loop, the source is not ordinary IWDG
+     * starvation and hardware reset/brownout becomes much more likely.
+     */
+    IWDG->KR = 0xAAAAU;
+    fault_diag_trap_loop_count++;
+  }
+}
 
 /* USER CODE END 0 */
 
@@ -97,12 +161,9 @@ extern IWDG_HandleTypeDef hiwdg;
 void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
-
+  BolusDiag_FaultTrap(BOLUS_FAULT_DIAG_NMI);
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
-   while (1)
-  {
-  }
   /* USER CODE END NonMaskableInt_IRQn 1 */
 }
 
@@ -112,7 +173,7 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  BolusDiag_FaultTrap(BOLUS_FAULT_DIAG_HARDFAULT);
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -127,7 +188,7 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-
+  BolusDiag_FaultTrap(BOLUS_FAULT_DIAG_MEMMANAGE);
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
@@ -142,7 +203,7 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
-
+  BolusDiag_FaultTrap(BOLUS_FAULT_DIAG_BUSFAULT);
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {
@@ -157,7 +218,7 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
-
+  BolusDiag_FaultTrap(BOLUS_FAULT_DIAG_USAGEFAULT);
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
   {
@@ -250,10 +311,7 @@ void SysTick_Handler(void)
  *   line 6 -> PC6 / PEDO_INT2 (unused for now)
  *   line 7 -> PC7 / PEDO_INT1 / BMA456 Any-Motion
  *
- * Every pending producer on a shared vector must be acknowledged. In the
- * previous diagnostic implementation the radio's line 5 was never cleared.
- * A single DIO2 edge could therefore retrigger this IRQ continuously and keep
- * the CPU away from SysTick until IWDG reset it.
+ * Every pending producer on a shared vector must be acknowledged.
  */
 void EXTI9_5_IRQHandler(void)
 {
