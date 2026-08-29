@@ -27,6 +27,9 @@ uint8_t bma456_diag_perf_mode = 0U;
 uint8_t bma456_diag_range_code = 0U;
 uint8_t bma456_diag_range_g = 0U;
 uint8_t bma456_diag_advanced_power_save = 0xFFU;
+bool bma456_diag_step_params_valid = false;
+uint16_t bma456_diag_step_param5 = 0U;
+uint16_t bma456_diag_step_param13 = 0U;
 
 static struct bma4_dev s_dev = {0};
 static bool s_ready = false;
@@ -317,6 +320,9 @@ static bma456_motion_status_t ConfigureStepCounter(
     int8_t result;
 
     s_step_counter_enabled = false;
+    bma456_diag_step_params_valid = false;
+    bma456_diag_step_param5 = 0U;
+    bma456_diag_step_param13 = 0U;
 
     if (!enable)
     {
@@ -350,6 +356,21 @@ static bma456_motion_status_t ConfigureStepCounter(
             return BMA456_MOTION_ERROR_CONFIG;
         }
     }
+
+    /*
+     * Read the parameters back from the BMA456 feature configuration after
+     * the optional write. This distinguishes "requested profile" from what
+     * is actually stored in the feature engine.
+     */
+    result = bma456h_stepcounter_get_parameter(&settings, &s_dev);
+    if (result != BMA4_OK)
+    {
+        return BMA456_MOTION_ERROR_CONFIG;
+    }
+
+    bma456_diag_step_param5 = settings.param5;
+    bma456_diag_step_param13 = settings.param13;
+    bma456_diag_step_params_valid = true;
 
     result = bma456h_feature_enable(
         BMA456H_STEP_COUNTER_EN,
@@ -403,6 +424,9 @@ bma456_motion_status_t BMA456Motion_Init(
     bma456_diag_range_code = 0U;
     bma456_diag_range_g = 0U;
     bma456_diag_advanced_power_save = 0xFFU;
+    bma456_diag_step_params_valid = false;
+    bma456_diag_step_param5 = 0U;
+    bma456_diag_step_param13 = 0U;
 
     s_dev.intf = BMA4_SPI_INTF;
     s_dev.bus_read = MotionSpiRead;
