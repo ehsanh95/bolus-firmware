@@ -26,8 +26,6 @@
 #include "bolus_led.h"
 #include "battery.h"
 #include "sensor_service.h"
-#include "bma_event_service.h"
-#include "event_acquisition_service.h"
 #include "bolus_runtime_config.h"
 #include "rfm95w_board.h"
 #include "timer.h"
@@ -99,20 +97,6 @@ sensor_service_bma_sample_t bma456_service_sample = {0};
 bool bma456_service_ready = false;
 uint32_t bma456_service_last_read_tick = 0U;
 
-/* BMA456 Any-Motion interrupt/event diagnostics. */
-bma_event_service_status_t bma_event_service_init_status = BMA_EVENT_SERVICE_ERROR_INIT;
-bma_event_service_status_t bma_event_service_read_status = BMA_EVENT_SERVICE_ERROR_READ;
-bma_event_service_sample_t bma_event_service_sample = {0};
-bool bma_event_service_ready = false;
-volatile uint32_t bma_event_irq_sequence = 0U;
-volatile uint32_t bma_event_irq_tick_ms = 0U;
-uint32_t bma_event_irq_handled_sequence = 0U;
-uint32_t bma_event_confirmed_count = 0U;
-
-/* Confirmed-event multisensor acquisition diagnostics. */
-event_acquisition_status_t event_acquisition_status = EVENT_ACQUISITION_ERROR_NO_DATA;
-event_acquisition_capture_t event_acquisition_capture = {0};
-
 /* TMP117 SensorService diagnostics. */
 sensor_service_status_t tmp_service_init_status = SENSOR_SERVICE_ERROR_TMP_INIT;
 sensor_service_status_t tmp_service_read_status = SENSOR_SERVICE_ERROR_TMP_READ;
@@ -166,22 +150,6 @@ static HAL_StatusTypeDef BMA456_RawReadRegister(uint8_t reg, uint8_t *value)
     }
 
     return status;
-}
-
-/*
- * One project-wide HAL EXTI callback dispatches to each owner. The RFM95W
- * board handler preserves existing DIO0/1/2 behavior; the BMA path remains
- * deliberately tiny and only records pending work for main/thread context.
- */
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    RFM95W_Board_HandleExti(GPIO_Pin);
-
-    if (GPIO_Pin == PEDO_INT1_Pin)
-    {
-        bma_event_irq_tick_ms = HAL_GetTick();
-        bma_event_irq_sequence++;
-    }
 }
 /* USER CODE END 0 */
 
@@ -252,21 +220,6 @@ int main(void)
   {
       bma456_service_read_status = SensorService_ReadBmaSample(&bma456_service_sample);
       bma456_service_last_read_tick = HAL_GetTick();
-
-      /* Configure independent Bosch Any-Motion -> INT1 after feature upload. */
-      bma_event_service_init_status =
-          BmaEventService_Init(&hspi2, &sensor_service_config);
-      bma_event_service_ready =
-          ((bma_event_service_init_status == BMA_EVENT_SERVICE_OK) &&
-           BmaEventService_IsReady());
-
-      if (bma_event_service_ready)
-      {
-          __HAL_GPIO_EXTI_CLEAR_IT(PEDO_INT1_Pin);
-          __HAL_GPIO_EXTI_CLEAR_IT(PEDO_INT2_Pin);
-          HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5U, 0U);
-          HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
-      }
   }
 
   /* TMP117: one-shot temperature path, shutdown between samples. */
@@ -280,13 +233,18 @@ int main(void)
   }
 
   /*
-   * MPU6050: normally rail-OFF. Init verifies the path and powers it back OFF.
-   * Product acquisition now happens only after a confirmed BMA Any-Motion
-   * event; the old 5-second bench polling path is intentionally removed.
+   * MPU6050: normally rail-OFF. Init verifies the path and powers it back OFF;
+   * each sample below is a complete power-up/configure/read/sleep/power-off
+   * transaction owned exclusively by SensorService.
    */
   mpu_service_init_status = SensorService_InitMpu(&hi2c1, &sensor_service_config);
   mpu_service_ready =
       ((mpu_service_init_status == SENSOR_SERVICE_OK) && SensorService_IsMpuReady());
+  if (mpu_service_ready)
+  {
+      mpu_service_read_status = SensorService_ReadMpuSample(&mpu_service_sample);
+      mpu_service_last_read_tick = HAL_GetTick();
+  }
 
   /* RFM95W / SX1276 Phase 4 regression test. No RF transmission. */
   BolusPower_On(BOLUS_POWER_RFM95W);
@@ -344,34 +302,6 @@ int main(void)
     /* USER CODE BEGIN 3 */
     TimerProcess();
 
-    if (bma_event_service_ready &&
-        (bma_event_irq_handled_sequence != bma_event_irq_sequence))
-    {
-        uint32_t irq_sequence;
-        uint32_t trigger_tick_ms;
-
-        /* Take an atomic snapshot of the tiny ISR-owned state. */
-        __disable_irq();
-        irq_sequence = bma_event_irq_sequence;
-        trigger_tick_ms = bma_event_irq_tick_ms;
-        __enable_irq();
-
-        bma_event_service_read_status =
-            BmaEventService_Read(&bma_event_service_sample);
-        bma_event_irq_handled_sequence = irq_sequence;
-
-        if ((bma_event_service_read_status == BMA_EVENT_SERVICE_OK) &&
-            bma_event_service_sample.any_motion)
-        {
-            bma_event_confirmed_count++;
-            event_acquisition_status = EventAcquisitionService_Capture(
-                &sensor_service_config,
-                trigger_tick_ms,
-                &event_acquisition_capture);
-        }
-    }
-
-    /* Keep a slow BMA snapshot visible during this interrupt bench test. */
     if (bma456_service_ready &&
         ((HAL_GetTick() - bma456_service_last_read_tick) >= 500U))
     {
@@ -379,12 +309,20 @@ int main(void)
         bma456_service_read_status = SensorService_ReadBmaSample(&bma456_service_sample);
     }
 
-    /*
-     * TMP117 and MPU6050 are no longer polled every 2/5 seconds. After the
-     * boot sanity sample, both event-context acquisitions are driven by the
-     * confirmed BMA interrupt path above. The 15-minute baseline scheduler is
-     * added later with the application/radio state machine.
-     */
+    if (tmp_service_ready &&
+        ((HAL_GetTick() - tmp_service_last_read_tick) >= 2000U))
+    {
+        tmp_service_last_read_tick = HAL_GetTick();
+        tmp_service_read_status = SensorService_ReadTemperatureOneShot(&tmp_service_sample);
+    }
+
+    /* Bench-only 5 s cadence. Production MPU acquisition is event/schedule driven. */
+    if (mpu_service_ready &&
+        ((HAL_GetTick() - mpu_service_last_read_tick) >= 5000U))
+    {
+        mpu_service_last_read_tick = HAL_GetTick();
+        mpu_service_read_status = SensorService_ReadMpuSample(&mpu_service_sample);
+    }
 
     HAL_IWDG_Refresh(&hiwdg);
     HAL_Delay(10U);

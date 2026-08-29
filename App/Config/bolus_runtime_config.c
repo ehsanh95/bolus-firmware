@@ -81,13 +81,13 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->bma.fifo_enable = true;
     config->bma.motion_interrupt_enable = true;
 
-    /* MPU6050: normally rail-OFF; BMA event requests a short detailed capture. */
+    /* MPU6050: short detailed burst; event triggering is enabled later. */
     config->mpu.scheduled_period_s = 900U;
     config->mpu.burst_duration_ms = 1000U;
     config->mpu.sample_rate_hz = 100U;
     config->mpu.accel_range_g = 4U;
     config->mpu.gyro_range_dps = 500U;
-    config->mpu.event_trigger_enable = true;
+    config->mpu.event_trigger_enable = false;
 
     /*
      * Event-processing defaults are literature-reference benchmarks only.

@@ -116,14 +116,6 @@ void Sx_Board_Bus_Init(void);
 
 void Sx_Board_Bus_deInit(void);
 
-/*
- * Dispatch one HAL EXTI callback to the SX1276 DIO handlers. The application
- * owns the single global HAL_GPIO_EXTI_Callback and forwards every GPIO pin
- * here so radio and non-radio interrupt sources can coexist without duplicate
- * HAL callback definitions.
- */
-void RFM95W_Board_HandleExti(uint16_t gpio_pin);
-
 
 /*
  * ============================================================

@@ -372,7 +372,7 @@ void Sx_Board_Bus_Init(void)
      */
 
     HAL_GPIO_WritePin(
-        RFM95W_NSS_GPIO_Port,
+    	RFM95W_NSS_GPIO_Port,
         RFM95W_NSS_Pin,
         GPIO_PIN_SET);
 }
@@ -409,31 +409,30 @@ HAL_StatusTypeDef RFM95W_Board_GetLastSpiStatus(void)
 
 /*
  * ============================================================
- * RFM95W EXTI dispatcher
+ * STM32 HAL EXTI callback
  * ============================================================
  *
- * The project has multiple EXTI producers (RFM95W, BMA456, and later other
- * sensors), so this driver must not define the global HAL_GPIO_EXTI_Callback.
- * Core/application code owns that one HAL callback and forwards the pin here.
+ * This becomes active when RFM_DIO0/1/2 are configured
+ * as EXTI inputs in CubeMX.
  */
 
-void RFM95W_Board_HandleExti(uint16_t gpio_pin)
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    if (gpio_pin == RFM_DIO0_Pin)
+    if (GPIO_Pin == RFM_DIO0_Pin)
     {
         if (s_rfm95w_dio_handlers[0] != NULL)
         {
             s_rfm95w_dio_handlers[0]();
         }
     }
-    else if (gpio_pin == RFM_DIO1_Pin)
+    else if (GPIO_Pin == RFM_DIO1_Pin)
     {
         if (s_rfm95w_dio_handlers[1] != NULL)
         {
             s_rfm95w_dio_handlers[1]();
         }
     }
-    else if (gpio_pin == RFM_DIO2_Pin)
+    else if (GPIO_Pin == RFM_DIO2_Pin)
     {
         if (s_rfm95w_dio_handlers[2] != NULL)
         {
@@ -441,7 +440,6 @@ void RFM95W_Board_HandleExti(uint16_t gpio_pin)
         }
     }
 }
-
 /*
  * ============================================================
  * Bolus Phase 4 raw register read
