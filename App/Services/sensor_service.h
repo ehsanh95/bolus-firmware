@@ -17,7 +17,9 @@ typedef enum
     SENSOR_SERVICE_ERROR_TMP_INIT,
     SENSOR_SERVICE_ERROR_TMP_READ,
     SENSOR_SERVICE_ERROR_TMP_TIMEOUT,
-    SENSOR_SERVICE_ERROR_TMP_INVALID_DATA
+    SENSOR_SERVICE_ERROR_TMP_INVALID_DATA,
+    SENSOR_SERVICE_ERROR_MPU_INIT,
+    SENSOR_SERVICE_ERROR_MPU_READ
 } sensor_service_status_t;
 
 typedef struct
@@ -37,6 +39,23 @@ typedef struct
     uint16_t device_id;
     uint8_t averaging_samples;
 } sensor_service_temperature_sample_t;
+
+typedef struct
+{
+    int16_t accel_x_mg;
+    int16_t accel_y_mg;
+    int16_t accel_z_mg;
+
+    int32_t gyro_x_mdps;
+    int32_t gyro_y_mdps;
+    int32_t gyro_z_mdps;
+
+    int32_t temperature_mdeg_c;
+
+    uint16_t sample_rate_hz;
+    uint8_t accel_range_g;
+    uint16_t gyro_range_dps;
+} sensor_service_mpu_sample_t;
 
 /* BMA456 low-power continuous motion path. */
 sensor_service_status_t SensorService_InitBma(
@@ -65,5 +84,25 @@ sensor_service_status_t SensorService_ReadTemperatureOneShot(
     sensor_service_temperature_sample_t *sample);
 
 bool SensorService_IsTemperatureReady(void);
+
+/*
+ * MPU6050 high-detail motion path.
+ *
+ * Phase-5 policy:
+ * - MPU6050 is normally power-gated OFF;
+ * - init verifies the configured sample rate/ranges and device identity;
+ * - each bench acquisition powers the rail, configures the device, captures
+ *   one bounded stabilized sample, sleeps the device, then powers the rail OFF;
+ * - multi-sample burst aggregation is added after this single-sample path is
+ *   bench-proven.
+ */
+sensor_service_status_t SensorService_InitMpu(
+    I2C_HandleTypeDef *hi2c,
+    const bolus_runtime_config_t *config);
+
+sensor_service_status_t SensorService_ReadMpuSample(
+    sensor_service_mpu_sample_t *sample);
+
+bool SensorService_IsMpuReady(void);
 
 #endif /* SENSOR_SERVICE_H */
