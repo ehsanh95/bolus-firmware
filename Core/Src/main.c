@@ -26,6 +26,7 @@
 #include "bolus_led.h"
 #include "battery.h"
 #include "sensor_service.h"
+#include "bma_event_service.h"
 #include "bolus_runtime_config.h"
 #include "rfm95w_board.h"
 #include "timer.h"
@@ -96,6 +97,10 @@ sensor_service_status_t bma456_service_read_status = SENSOR_SERVICE_ERROR_BMA_RE
 sensor_service_bma_sample_t bma456_service_sample = {0};
 bool bma456_service_ready = false;
 uint32_t bma456_service_last_read_tick = 0U;
+
+/* Stage-1 BMA Any-Motion diagnostics: sensor-side config only, MCU IRQ disabled. */
+bma_event_service_status_t bma_event_service_init_status = BMA_EVENT_SERVICE_ERROR_INIT;
+bool bma_event_service_ready = false;
 
 /* TMP117 SensorService diagnostics. */
 sensor_service_status_t tmp_service_init_status = SENSOR_SERVICE_ERROR_TMP_INIT;
@@ -220,6 +225,19 @@ int main(void)
   {
       bma456_service_read_status = SensorService_ReadBmaSample(&bma456_service_sample);
       bma456_service_last_read_tick = HAL_GetTick();
+
+      /*
+       * Staged bring-up STEP 1:
+       * configure/read back the BMA456 internal Any-Motion feature and INT1
+       * mapping, but DO NOT enable EXTI9_5 in the NVIC and do not install any
+       * BMA ISR path yet. This isolates sensor-side feature configuration from
+       * MCU interrupt handling.
+       */
+      bma_event_service_init_status =
+          BmaEventService_Init(&hspi2, &sensor_service_config);
+      bma_event_service_ready =
+          ((bma_event_service_init_status == BMA_EVENT_SERVICE_OK) &&
+           BmaEventService_IsReady());
   }
 
   /* TMP117: one-shot temperature path, shutdown between samples. */
