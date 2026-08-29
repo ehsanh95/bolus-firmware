@@ -15,7 +15,7 @@
  * Sensor/Radio service APIs.
  */
 
-#define BOLUS_RUNTIME_CONFIG_VERSION  3U
+#define BOLUS_RUNTIME_CONFIG_VERSION  4U
 
 typedef enum
 {
@@ -81,12 +81,16 @@ typedef struct
  * Multi-timescale event-processing policy.
  *
  * IMPORTANT:
- * - bma_event_sensitivity_level is independent from BMA Step Counter
- *   sensitivity. 0 means "leave the event detector at its hardware/default
- *   development setting"; 1..7 is the future Bolus/downlink calibration
- *   scale. The BMA driver mapping is deliberately implemented separately.
+ * - BMA event detection is independent from the native Step Counter settings.
+ * - bma_event_threshold_mg and bma_event_duration_ms are the actual hardware
+ *   Any-Motion controls that a future downlink can tune. A value of 0 means
+ *   "keep the Bosch feature-image value". This is the safest development
+ *   default because the cattle literature does not provide a portable BMA456
+ *   interrupt-amplitude threshold.
+ * - bma_event_sensitivity_level remains a product/UI profile identifier for
+ *   later field-calibrated mappings. Level 0 means raw/default mode.
  * - Published numerical values below are reference benchmarks, not universal
- *   cattle thresholds. V1 event outputs must preserve the rule_source so the
+ *   cattle thresholds. V1 event outputs must preserve rule_source so the
  *   backend can distinguish literature-reference matches from field-calibrated
  *   decisions.
  */
@@ -96,6 +100,8 @@ typedef struct
     bolus_event_rule_source_t rule_source;
 
     uint8_t bma_event_sensitivity_level;
+    uint16_t bma_event_threshold_mg;
+    uint16_t bma_event_duration_ms;
     uint16_t bma_event_cooldown_s;
 
     /* Published drinking trajectory reference values. */
