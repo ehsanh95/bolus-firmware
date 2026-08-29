@@ -1,6 +1,7 @@
 #include "bma_event_service.h"
 
 #include "bma456_event.h"
+#include "bma_irq_diag.h"
 #include "fault_manager.h"
 
 static bool s_event_service_ready = false;
@@ -48,6 +49,18 @@ bma_event_service_status_t BmaEventService_Init(
     (void)FaultManager_ClearFault(BOLUS_FAULT_CONFIG_INVALID);
 
     s_event_service_ready = BMA456Event_IsReady();
+
+    /*
+     * Staged bring-up STEP 2:
+     * once the sensor-side Any-Motion configuration is known-good, enable an
+     * isolated PC7/EXTI7 harness whose ISR only clears the pending edge and
+     * increments a counter. No BMA status read, TMP/MPU acquisition, or event
+     * processing is allowed from the interrupt path in this step.
+     */
+    if (s_event_service_ready)
+    {
+        BmaIrqDiag_EnableCounterOnly();
+    }
 
     return s_event_service_ready ?
         BMA_EVENT_SERVICE_OK : BMA_EVENT_SERVICE_ERROR_INIT;
