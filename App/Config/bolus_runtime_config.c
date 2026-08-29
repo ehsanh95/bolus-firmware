@@ -100,11 +100,14 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
      *   cattle-specific interrupt threshold before field calibration.
      * Drinking:
      * - published fall methods use 0.5 C / 5 min and 0.5 C / 10 min scales.
+     * - 38.1 C is retained as a weaker published absolute-temperature rule.
      * Contractions:
      * - direct intrareticular studies show approximately 8-10 s morphology
      *   and roughly 40-60 s inter-contraction timing.
-     * Hyperthermia:
-     * - 40.0 C is retained only as a published cohort-level reference.
+     * Health references:
+     * - 40.0 C is a cohort-level hyperthermia benchmark.
+     * - 39.4 C is an association reported with low-pH/SARA-risk periods and
+     *   must never be treated as a standalone SARA diagnosis.
      */
     config->event_processing.enable = true;
     config->event_processing.rule_source =
@@ -118,6 +121,7 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
 
     config->event_processing.drinking_drop_5min_mdeg_c = 500U;
     config->event_processing.drinking_drop_10min_mdeg_c = 500U;
+    config->event_processing.drinking_absolute_temp_reference_mdeg_c = 38100L;
 
     config->event_processing.contraction_duration_min_ms = 8000U;
     config->event_processing.contraction_duration_max_ms = 10000U;
@@ -125,6 +129,7 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->event_processing.contraction_interval_max_s = 60U;
 
     config->event_processing.hyperthermia_reference_mdeg_c = 40000L;
+    config->event_processing.sara_risk_reference_mdeg_c = 39400L;
 
     /* Radio defaults remain conservative development values. */
     config->radio.uplink_period_s = 900U;
@@ -267,6 +272,12 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         return false;
     }
 
+    if ((config->event_processing.drinking_absolute_temp_reference_mdeg_c < -55000L) ||
+        (config->event_processing.drinking_absolute_temp_reference_mdeg_c > 150000L))
+    {
+        return false;
+    }
+
     if ((config->event_processing.contraction_duration_min_ms == 0U) ||
         (config->event_processing.contraction_duration_min_ms >=
          config->event_processing.contraction_duration_max_ms) ||
@@ -284,7 +295,9 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
     }
 
     if ((config->event_processing.hyperthermia_reference_mdeg_c < -55000L) ||
-        (config->event_processing.hyperthermia_reference_mdeg_c > 150000L))
+        (config->event_processing.hyperthermia_reference_mdeg_c > 150000L) ||
+        (config->event_processing.sara_risk_reference_mdeg_c < -55000L) ||
+        (config->event_processing.sara_risk_reference_mdeg_c > 150000L))
     {
         return false;
     }
