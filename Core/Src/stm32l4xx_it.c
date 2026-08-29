@@ -200,4 +200,15 @@ void SysTick_Handler(void)
 
 /* USER CODE BEGIN 1 */
 
+/*
+ * PC6/PEDO_INT2 and PC7/PEDO_INT1 share EXTI9_5. Clear/dispatch both lines so
+ * an unexpected INT2 edge cannot leave the shared IRQ pending forever. The
+ * application callback currently acts only on PEDO_INT1 (BMA Any-Motion).
+ */
+void EXTI9_5_IRQHandler(void)
+{
+  HAL_GPIO_EXTI_IRQHandler(PEDO_INT2_Pin);
+  HAL_GPIO_EXTI_IRQHandler(PEDO_INT1_Pin);
+}
+
 /* USER CODE END 1 */
