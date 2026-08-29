@@ -3,6 +3,22 @@
 #include "main.h"
 
 
+/*
+ * Temporary Phase-5 diagnostic timings.
+ *
+ * The board currently uses very weak external gate pull-ups. During reset the
+ * MCU pins can briefly transition through Hi-Z before CubeMX drives the gates
+ * to their OFF levels. Give every switched rail time to reach a definite OFF
+ * state before bring-up, and give each rail extra time to settle after ON.
+ *
+ * These delays are deliberately conservative for diagnosis only. Once the
+ * power-gate hardware is characterized they should be reduced/removed and the
+ * final timings owned by PowerService.
+ */
+#define BOLUS_POWER_DIAG_ALL_OFF_SETTLE_MS   250U
+#define BOLUS_POWER_DIAG_RAIL_ON_SETTLE_MS    50U
+
+
 static bool BolusPower_IsValidDomain(bolus_power_domain_t domain)
 {
     return ((domain >= BOLUS_POWER_TMP117) &&
@@ -42,6 +58,12 @@ void BolusPower_Init(void)
      * NOT touched here.
      */
     BolusPower_AllOff();
+
+    /*
+     * Diagnostic only: allow weak gate pull-ups, MOSFET gates and downstream
+     * rail capacitance to settle completely before any sensor is powered.
+     */
+    HAL_Delay(BOLUS_POWER_DIAG_ALL_OFF_SETTLE_MS);
 }
 
 
@@ -102,6 +124,13 @@ void BolusPower_On(bolus_power_domain_t domain)
         default:
             break;
     }
+
+    /*
+     * Diagnostic only: do not access a newly enabled peripheral immediately.
+     * Existing device-specific delays still remain in their services, so this
+     * intentionally exaggerates settling time for the current bench test.
+     */
+    HAL_Delay(BOLUS_POWER_DIAG_RAIL_ON_SETTLE_MS);
 }
 
 
