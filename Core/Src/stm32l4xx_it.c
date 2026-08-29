@@ -35,11 +35,10 @@
 /*
  * Diagnostic only. Production code must feed the watchdog from the application
  * health path, not blindly from SysTick. 100 ms is deliberately much shorter
- * than the current ~1 s IWDG timeout so we can prove whether watchdog starvation
- * is causing the observed reset loop while still allowing hard faults/disabled
- * interrupts to reset the MCU.
+ * than the current ~1 s IWDG timeout so we can isolate reset-loop causes.
  */
 #define BOLUS_IWDG_DIAG_SYSTICK_REFRESH_MS  100U
+#define BOLUS_IWDG_RELOAD_KEY                0xAAAAU
 
 #define BOLUS_FAULT_DIAG_NMI         1U
 #define BOLUS_FAULT_DIAG_HARDFAULT   2U
@@ -58,6 +57,8 @@
 /* USER CODE BEGIN PV */
 
 volatile uint32_t iwdg_diag_systick_refresh_count = 0U;
+volatile uint32_t iwdg_diag_last_tick_ms = 0U;
+volatile uint8_t iwdg_diag_hal_handle_ok = 0U;
 
 /*
  * Shared EXTI9_5 diagnostics.
@@ -137,7 +138,7 @@ static void BolusDiag_FaultTrap(uint32_t code)
      * If the board STILL resets from this loop, the source is not ordinary IWDG
      * starvation and hardware reset/brownout becomes much more likely.
      */
-    IWDG->KR = 0xAAAAU;
+    IWDG->KR = BOLUS_IWDG_RELOAD_KEY;
     fault_diag_trap_loop_count++;
   }
 }
@@ -280,16 +281,16 @@ void SysTick_Handler(void)
   /*
    * TEMPORARY RESET-LOOP DIAGNOSTIC ONLY.
    *
-   * If the board becomes stable with this enabled, the reset source is watchdog
-   * starvation in the application/init path rather than sensor power-gate
-   * settling itself. This must be removed once the offending blocking path is
-   * identified; feeding IWDG unconditionally from SysTick is not an acceptable
-   * production watchdog architecture.
+   * Reload IWDG through the peripheral register itself rather than through
+   * HAL_IWDG_Refresh(&hiwdg). If the reset loop disappears, the HAL handle was
+   * being corrupted or invalidated. If it still resets, SysTick itself is being
+   * blocked/stopped for longer than the watchdog timeout.
    */
-  if ((hiwdg.Instance == IWDG) &&
-      ((HAL_GetTick() % BOLUS_IWDG_DIAG_SYSTICK_REFRESH_MS) == 0U))
+  if ((HAL_GetTick() % BOLUS_IWDG_DIAG_SYSTICK_REFRESH_MS) == 0U)
   {
-    (void)HAL_IWDG_Refresh(&hiwdg);
+    iwdg_diag_last_tick_ms = HAL_GetTick();
+    iwdg_diag_hal_handle_ok = (hiwdg.Instance == IWDG) ? 1U : 0U;
+    IWDG->KR = BOLUS_IWDG_RELOAD_KEY;
     iwdg_diag_systick_refresh_count++;
   }
 
