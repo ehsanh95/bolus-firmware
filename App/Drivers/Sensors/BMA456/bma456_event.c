@@ -20,6 +20,7 @@ uint16_t bma456_event_diag_threshold_mg = 0U;
 uint16_t bma456_event_diag_duration_samples = 0U;
 uint32_t bma456_event_diag_duration_ms = 0U;
 uint16_t bma456_event_diag_last_raw_status = 0U;
+uint8_t bma456_event_diag_interrupt_mode = 0xFFU;
 
 static struct bma4_dev s_event_dev = {0};
 static bool s_event_ready = false;
@@ -200,6 +201,7 @@ bma456_event_status_t BMA456Event_Init(
     bma456_event_diag_duration_samples = 0U;
     bma456_event_diag_duration_ms = 0U;
     bma456_event_diag_last_raw_status = 0U;
+    bma456_event_diag_interrupt_mode = 0xFFU;
 
     s_event_dev = (struct bma4_dev){0};
     s_event_dev.intf = BMA4_SPI_INTF;
@@ -283,6 +285,27 @@ bma456_event_status_t BMA456Event_Init(
         BMA4_INTR1_MAP,
         &s_event_dev);
     if (result != BMA4_OK)
+    {
+        return BMA456_EVENT_ERROR_CONFIG;
+    }
+
+    /*
+     * Any-Motion is an edge source for the MCU. Force non-latched operation
+     * so INT1 returns inactive after each pulse instead of remaining asserted
+     * after the first event. This is independent from reading/acknowledging
+     * the feature status in main/application context.
+     */
+    result = bma4_set_interrupt_mode(BMA4_NON_LATCH_MODE, &s_event_dev);
+    if (result != BMA4_OK)
+    {
+        return BMA456_EVENT_ERROR_CONFIG;
+    }
+
+    result = bma4_get_interrupt_mode(
+        &bma456_event_diag_interrupt_mode,
+        &s_event_dev);
+    if ((result != BMA4_OK) ||
+        (bma456_event_diag_interrupt_mode != BMA4_NON_LATCH_MODE))
     {
         return BMA456_EVENT_ERROR_CONFIG;
     }
