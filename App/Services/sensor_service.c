@@ -2,6 +2,7 @@
 
 #include "bma456_motion.h"
 #include "tmp117.h"
+#include "mpu6050_motion.h"
 #include "bolus_power.h"
 #include "fault_manager.h"
 
@@ -10,6 +11,7 @@
 #define SENSOR_SERVICE_TMP_POLL_MS                2U
 #define SENSOR_SERVICE_TMP_DEVICE_ID_EXPECTED     0x0117U
 #define SENSOR_SERVICE_TMP_DRDY_MASK              (1U << 13)
+#define SENSOR_SERVICE_MPU_POWER_STABILIZE_MS    10U
 
 static bool s_bma_ready = false;
 static bool s_bma_step_enabled = false;
@@ -24,6 +26,10 @@ static uint8_t s_tmp_buffer[3] = {0};
 static uint16_t s_tmp_device_id = 0U;
 static uint8_t s_tmp_averaging_samples = 1U;
 static uint32_t s_tmp_conversion_timeout_ms = 50U;
+
+static bool s_mpu_ready = false;
+static I2C_HandleTypeDef *s_mpu_i2c = NULL;
+static mpu6050_motion_config_t s_mpu_config = {0};
 
 static bool MapBmaOdr(
     bolus_bma_odr_t odr,
@@ -477,4 +483,133 @@ sensor_service_status_t SensorService_ReadTemperatureOneShot(
 bool SensorService_IsTemperatureReady(void)
 {
     return s_tmp_ready;
+}
+
+sensor_service_status_t SensorService_InitMpu(
+    I2C_HandleTypeDef *hi2c,
+    const bolus_runtime_config_t *config)
+{
+    mpu6050_motion_status_t status;
+
+    if ((hi2c == NULL) || (config == NULL))
+    {
+        return SENSOR_SERVICE_ERROR_PARAM;
+    }
+
+    if (!BolusRuntimeConfig_Validate(config))
+    {
+        FaultManager_Raise(BOLUS_FAULT_CONFIG_INVALID);
+        return SENSOR_SERVICE_ERROR_CONFIG;
+    }
+
+    s_mpu_ready = false;
+    s_mpu_i2c = hi2c;
+    s_mpu_config.sample_rate_hz = config->mpu.sample_rate_hz;
+    s_mpu_config.accel_range_g = config->mpu.accel_range_g;
+    s_mpu_config.gyro_range_dps = config->mpu.gyro_range_dps;
+
+    /*
+     * Verify the complete MPU path once, then physically power it back OFF.
+     * Every later burst re-applies configuration after rail power-up.
+     */
+    BolusPower_On(BOLUS_POWER_MPU6050);
+    HAL_Delay(SENSOR_SERVICE_MPU_POWER_STABILIZE_MS);
+
+    status = MPU6050Motion_Init(s_mpu_i2c, &s_mpu_config);
+
+    if (status == MPU6050_MOTION_OK)
+    {
+        (void)MPU6050Motion_Sleep();
+    }
+
+    BolusPower_Off(BOLUS_POWER_MPU6050);
+
+    if (status != MPU6050_MOTION_OK)
+    {
+        FaultManager_Raise(BOLUS_FAULT_MPU6050_INIT);
+
+        if (status == MPU6050_MOTION_ERROR_COMM)
+        {
+            FaultManager_Raise(BOLUS_FAULT_MPU6050_COMM);
+        }
+
+        return SENSOR_SERVICE_ERROR_MPU_INIT;
+    }
+
+    (void)FaultManager_ClearFault(BOLUS_FAULT_MPU6050_INIT);
+    (void)FaultManager_ClearFault(BOLUS_FAULT_MPU6050_COMM);
+    (void)FaultManager_ClearFault(BOLUS_FAULT_CONFIG_INVALID);
+
+    s_mpu_ready = true;
+    return SENSOR_SERVICE_OK;
+}
+
+sensor_service_status_t SensorService_ReadMpuSample(
+    sensor_service_mpu_sample_t *sample)
+{
+    mpu6050_motion_status_t status;
+    mpu6050_motion_sample_t motion_sample = {0};
+
+    if (sample == NULL)
+    {
+        return SENSOR_SERVICE_ERROR_PARAM;
+    }
+
+    if ((!s_mpu_ready) || (s_mpu_i2c == NULL))
+    {
+        FaultManager_Raise(BOLUS_FAULT_MPU6050_INIT);
+        return SENSOR_SERVICE_ERROR_MPU_READ;
+    }
+
+    /*
+     * MPU6050 is normally rail-OFF. A detailed acquisition is an explicit
+     * power-up/configure/wake/sample/sleep/power-off transaction.
+     */
+    BolusPower_On(BOLUS_POWER_MPU6050);
+    HAL_Delay(SENSOR_SERVICE_MPU_POWER_STABILIZE_MS);
+
+    status = MPU6050Motion_Init(s_mpu_i2c, &s_mpu_config);
+
+    if (status == MPU6050_MOTION_OK)
+    {
+        status = MPU6050Motion_ReadSample(&motion_sample);
+    }
+
+    if (MPU6050Motion_IsReady())
+    {
+        (void)MPU6050Motion_Sleep();
+    }
+
+    BolusPower_Off(BOLUS_POWER_MPU6050);
+
+    if (status != MPU6050_MOTION_OK)
+    {
+        FaultManager_Raise(BOLUS_FAULT_MPU6050_COMM);
+        return SENSOR_SERVICE_ERROR_MPU_READ;
+    }
+
+    sample->accel_x_mg = motion_sample.accel_x_mg;
+    sample->accel_y_mg = motion_sample.accel_y_mg;
+    sample->accel_z_mg = motion_sample.accel_z_mg;
+
+    sample->gyro_x_mdps = motion_sample.gyro_x_mdps;
+    sample->gyro_y_mdps = motion_sample.gyro_y_mdps;
+    sample->gyro_z_mdps = motion_sample.gyro_z_mdps;
+
+    sample->temperature_mdeg_c = motion_sample.temperature_mdeg_c;
+
+    sample->sample_rate_hz = s_mpu_config.sample_rate_hz;
+    sample->accel_range_g = s_mpu_config.accel_range_g;
+    sample->gyro_range_dps = s_mpu_config.gyro_range_dps;
+
+    (void)FaultManager_ClearFault(BOLUS_FAULT_MPU6050_INIT);
+    (void)FaultManager_ClearFault(BOLUS_FAULT_MPU6050_COMM);
+    (void)FaultManager_ClearFault(BOLUS_FAULT_MPU6050_TIMEOUT);
+
+    return SENSOR_SERVICE_OK;
+}
+
+bool SensorService_IsMpuReady(void)
+{
+    return s_mpu_ready;
 }
