@@ -89,6 +89,37 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->mpu.gyro_range_dps = 500U;
     config->mpu.event_trigger_enable = false;
 
+    /*
+     * Event-processing defaults are literature-reference benchmarks only.
+     * They are intentionally kept in RuntimeConfig so future downlink/field
+     * calibration replaces values without rewriting the classifier.
+     *
+     * Drinking:
+     * - published fall methods use 0.5 C / 5 min and 0.5 C / 10 min scales.
+     * Contractions:
+     * - direct intrareticular studies show approximately 8-10 s morphology
+     *   and roughly 40-60 s inter-contraction timing.
+     * Hyperthermia:
+     * - 40.0 C is retained only as a published cohort-level reference.
+     */
+    config->event_processing.enable = true;
+    config->event_processing.rule_source =
+        BOLUS_EVENT_RULES_REFERENCE_BENCHMARK;
+
+    /* Separate from Step Counter sensitivity; mapping is field-calibrated. */
+    config->event_processing.bma_event_sensitivity_level = 0U;
+    config->event_processing.bma_event_cooldown_s = 0U;
+
+    config->event_processing.drinking_drop_5min_mdeg_c = 500U;
+    config->event_processing.drinking_drop_10min_mdeg_c = 500U;
+
+    config->event_processing.contraction_duration_min_ms = 8000U;
+    config->event_processing.contraction_duration_max_ms = 10000U;
+    config->event_processing.contraction_interval_min_s = 40U;
+    config->event_processing.contraction_interval_max_s = 60U;
+
+    config->event_processing.hyperthermia_reference_mdeg_c = 40000L;
+
     /* Radio defaults remain conservative development values. */
     config->radio.uplink_period_s = 900U;
     config->radio.tx_power_dbm = 10;
@@ -181,6 +212,52 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         (config->mpu.gyro_range_dps != 500U) &&
         (config->mpu.gyro_range_dps != 1000U) &&
         (config->mpu.gyro_range_dps != 2000U))
+    {
+        return false;
+    }
+
+    if (config->event_processing.rule_source >
+        BOLUS_EVENT_RULES_FIELD_CALIBRATED)
+    {
+        return false;
+    }
+
+    if (config->event_processing.bma_event_sensitivity_level > 7U)
+    {
+        return false;
+    }
+
+    if (config->event_processing.bma_event_cooldown_s > 3600U)
+    {
+        return false;
+    }
+
+    if ((config->event_processing.drinking_drop_5min_mdeg_c == 0U) ||
+        (config->event_processing.drinking_drop_5min_mdeg_c > 10000U) ||
+        (config->event_processing.drinking_drop_10min_mdeg_c == 0U) ||
+        (config->event_processing.drinking_drop_10min_mdeg_c > 10000U))
+    {
+        return false;
+    }
+
+    if ((config->event_processing.contraction_duration_min_ms == 0U) ||
+        (config->event_processing.contraction_duration_min_ms >=
+         config->event_processing.contraction_duration_max_ms) ||
+        (config->event_processing.contraction_duration_max_ms > 30000U))
+    {
+        return false;
+    }
+
+    if ((config->event_processing.contraction_interval_min_s == 0U) ||
+        (config->event_processing.contraction_interval_min_s >=
+         config->event_processing.contraction_interval_max_s) ||
+        (config->event_processing.contraction_interval_max_s > 600U))
+    {
+        return false;
+    }
+
+    if ((config->event_processing.hyperthermia_reference_mdeg_c < -55000L) ||
+        (config->event_processing.hyperthermia_reference_mdeg_c > 150000L))
     {
         return false;
     }
