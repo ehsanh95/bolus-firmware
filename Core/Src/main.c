@@ -27,6 +27,7 @@
 #include "battery.h"
 #include "sensor_service.h"
 #include "bma_event_service.h"
+#include "bma_irq_diag.h"
 #include "bolus_runtime_config.h"
 #include "rfm95w_board.h"
 #include "timer.h"
@@ -98,9 +99,14 @@ sensor_service_bma_sample_t bma456_service_sample = {0};
 bool bma456_service_ready = false;
 uint32_t bma456_service_last_read_tick = 0U;
 
-/* Stage-1 BMA Any-Motion diagnostics: sensor-side config only, MCU IRQ disabled. */
+/* BMA Any-Motion + isolated INT1 bring-up diagnostics. */
 bma_event_service_status_t bma_event_service_init_status = BMA_EVENT_SERVICE_ERROR_INIT;
+bma_event_service_status_t bma_event_service_read_status = BMA_EVENT_SERVICE_ERROR_READ;
+bma_event_service_sample_t bma_event_service_sample = {0};
 bool bma_event_service_ready = false;
+uint32_t bma_event_service_processed_irq_count = 0U;
+uint32_t bma_event_service_ack_count = 0U;
+uint32_t bma_event_service_any_motion_count = 0U;
 
 /* TMP117 SensorService diagnostics. */
 sensor_service_status_t tmp_service_init_status = SENSOR_SERVICE_ERROR_TMP_INIT;
@@ -227,11 +233,10 @@ int main(void)
       bma456_service_last_read_tick = HAL_GetTick();
 
       /*
-       * Staged bring-up STEP 1:
-       * configure/read back the BMA456 internal Any-Motion feature and INT1
-       * mapping, but DO NOT enable EXTI9_5 in the NVIC and do not install any
-       * BMA ISR path yet. This isolates sensor-side feature configuration from
-       * MCU interrupt handling.
+       * Staged bring-up STEP 3:
+       * configure/read back BMA456 Any-Motion, enable only PC7/BMA INT1 at
+       * the MCU, then acknowledge feature status later from the main context.
+       * No SPI/I2C work is performed in the EXTI ISR.
        */
       bma_event_service_init_status =
           BmaEventService_Init(&hspi2, &sensor_service_config);
@@ -319,6 +324,33 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     TimerProcess();
+
+    /*
+     * Consume BMA INT1 edges in normal main context. The EXTI ISR only counts
+     * edges; the SPI status read happens here so the Bosch feature interrupt
+     * is acknowledged/re-armed without doing bus work inside the ISR.
+     */
+    if (bma_event_service_ready)
+    {
+        uint32_t irq_count_snapshot = bma_irq_diag_count;
+
+        if (irq_count_snapshot != bma_event_service_processed_irq_count)
+        {
+            bma_event_service_read_status =
+                BmaEventService_Read(&bma_event_service_sample);
+
+            if (bma_event_service_read_status == BMA_EVENT_SERVICE_OK)
+            {
+                bma_event_service_processed_irq_count = irq_count_snapshot;
+                bma_event_service_ack_count++;
+
+                if (bma_event_service_sample.any_motion)
+                {
+                    bma_event_service_any_motion_count++;
+                }
+            }
+        }
+    }
 
     if (bma456_service_ready &&
         ((HAL_GetTick() - bma456_service_last_read_tick) >= 500U))
@@ -569,8 +601,14 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOB, Pedo_NSS_Pin|TMP_PWR_ON_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(GPIOC, Main_Reg_PWR_ON_Pin|LED1_Pin, GPIO_PIN_RESET);
 
-  GPIO_InitStruct.Pin = TMP_INT_Pin|PEDO_INT2_Pin|PEDO_INT1_Pin;
+  /* Phase-5 sensor-event bring-up: BMA INT1 is the only active EXTI source. */
+  GPIO_InitStruct.Pin = PEDO_INT1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(PEDO_INT1_GPIO_Port, &GPIO_InitStruct);
+
+  GPIO_InitStruct.Pin = TMP_INT_Pin|PEDO_INT2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
@@ -598,13 +636,14 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(BUTTON_GPIO_Port, &GPIO_InitStruct);
 
+  /* Radio DIOs stay readable inputs; their EXTI paths are not enabled yet. */
   GPIO_InitStruct.Pin = RFM_DIO0_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(RFM_DIO0_GPIO_Port, &GPIO_InitStruct);
 
   GPIO_InitStruct.Pin = RFM_DIO1_Pin|RFM_DIO2_Pin|MPU_INT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 }
