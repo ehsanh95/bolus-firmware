@@ -201,13 +201,16 @@ void SysTick_Handler(void)
 /* USER CODE BEGIN 1 */
 
 /*
- * PC6/PEDO_INT2 and PC7/PEDO_INT1 share EXTI9_5. Clear/dispatch both lines so
- * an unexpected INT2 edge cannot leave the shared IRQ pending forever. The
- * application callback currently acts only on PEDO_INT1 (BMA Any-Motion).
+ * PC6/PEDO_INT2 and PC7/PEDO_INT1 share EXTI9_5. Phase 5 uses only INT1 for
+ * BMA Any-Motion. INT2 was left configured as an EXTI input by CubeMX; once the
+ * shared NVIC line was enabled, a noisy/floating INT2 could repeatedly wake
+ * the CPU and starve the watchdog. Mask INT2 at the EXTI IMR and service only
+ * INT1. The line can be re-enabled later when it has an explicit owner.
  */
 void EXTI9_5_IRQHandler(void)
 {
-  HAL_GPIO_EXTI_IRQHandler(PEDO_INT2_Pin);
+  EXTI->IMR1 &= ~((uint32_t)PEDO_INT2_Pin);
+  __HAL_GPIO_EXTI_CLEAR_IT(PEDO_INT2_Pin);
   HAL_GPIO_EXTI_IRQHandler(PEDO_INT1_Pin);
 }
 
