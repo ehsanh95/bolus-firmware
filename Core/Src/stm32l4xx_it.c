@@ -54,12 +54,16 @@
 volatile uint32_t iwdg_diag_systick_refresh_count = 0U;
 
 /*
- * One-shot EXTI diagnostics for the current reset-loop investigation.
- * If the BMA INT1 line is repeatedly retriggering at priority 5, it can starve
- * lower-priority SysTick long enough for IWDG to reset the MCU. The diagnostic
- * handler masks INT1 immediately on its first entry so we can prove or reject
- * that hypothesis without changing the BMA feature configuration itself.
+ * Shared EXTI9_5 diagnostics.
+ *
+ * EXTI line 5 belongs to RFM_DIO2 (PB5), line 6 to the currently unused
+ * PEDO_INT2 (PC6), and line 7 to BMA456 PEDO_INT1 (PC7). They all share the
+ * same NVIC vector. The previous bench handler serviced only lines 6/7, so a
+ * pending radio DIO2 edge on line 5 could leave EXTI9_5 permanently pending
+ * and starve lower-priority SysTick until IWDG reset the MCU.
  */
+volatile uint32_t exti9_5_diag_entry_count = 0U;
+volatile uint32_t rfm_dio2_diag_dispatch_count = 0U;
 volatile uint32_t bma_irq_diag_entry_count = 0U;
 volatile uint32_t bma_irq_diag_last_tick_ms = 0U;
 volatile uint8_t bma_irq_diag_int1_masked = 0U;
@@ -241,24 +245,40 @@ void SysTick_Handler(void)
 /* USER CODE BEGIN 1 */
 
 /*
- * PC6/PEDO_INT2 and PC7/PEDO_INT1 share EXTI9_5.
+ * EXTI9_5 is shared by three physical lines on the current PCB:
+ *   line 5 -> PB5 / RFM_DIO2
+ *   line 6 -> PC6 / PEDO_INT2 (unused for now)
+ *   line 7 -> PC7 / PEDO_INT1 / BMA456 Any-Motion
  *
- * DIAGNOSTIC MODE: mask BOTH lines immediately when the shared IRQ is entered.
- * INT2 is unused already. INT1 is intentionally made one-shot for this bench
- * test. If the reset loop disappears, the BMA INT1 path is retriggering fast
- * enough to starve SysTick/IWDG. If the reset remains with entry_count == 0 or
- * after INT1 is masked, the cause is elsewhere.
+ * Every pending producer on a shared vector must be acknowledged. In the
+ * previous diagnostic implementation the radio's line 5 was never cleared.
+ * A single DIO2 edge could therefore retrigger this IRQ continuously and keep
+ * the CPU away from SysTick until IWDG reset it.
  */
 void EXTI9_5_IRQHandler(void)
 {
-  bma_irq_diag_entry_count++;
-  bma_irq_diag_last_tick_ms = HAL_GetTick();
+  exti9_5_diag_entry_count++;
 
-  EXTI->IMR1 &= ~((uint32_t)(PEDO_INT2_Pin | PEDO_INT1_Pin));
-  bma_irq_diag_int1_masked = 1U;
+  if (__HAL_GPIO_EXTI_GET_IT(RFM_DIO2_Pin) != 0U)
+  {
+    rfm_dio2_diag_dispatch_count++;
+    HAL_GPIO_EXTI_IRQHandler(RFM_DIO2_Pin);
+  }
 
-  __HAL_GPIO_EXTI_CLEAR_IT(PEDO_INT2_Pin);
-  HAL_GPIO_EXTI_IRQHandler(PEDO_INT1_Pin);
+  /* INT2 has no owner in Phase 5; keep it masked and clear any stale edge. */
+  EXTI->IMR1 &= ~((uint32_t)PEDO_INT2_Pin);
+  if (__HAL_GPIO_EXTI_GET_IT(PEDO_INT2_Pin) != 0U)
+  {
+    __HAL_GPIO_EXTI_CLEAR_IT(PEDO_INT2_Pin);
+  }
+
+  if (__HAL_GPIO_EXTI_GET_IT(PEDO_INT1_Pin) != 0U)
+  {
+    bma_irq_diag_entry_count++;
+    bma_irq_diag_last_tick_ms = HAL_GetTick();
+    bma_irq_diag_int1_masked = 0U;
+    HAL_GPIO_EXTI_IRQHandler(PEDO_INT1_Pin);
+  }
 }
 
 /* USER CODE END 1 */
