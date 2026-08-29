@@ -25,6 +25,27 @@ static bool IsValidatedBmaStepProfile(bolus_bma_step_sensitivity_t profile)
             (profile == BOLUS_BMA_STEP_SENSITIVITY_LEVEL_7));
 }
 
+static bool IsSupportedMpuSampleRate(uint16_t sample_rate_hz)
+{
+    uint16_t divider;
+
+    /*
+     * With DLPF enabled the MPU6050 internal sample clock is 1 kHz and:
+     * sample_rate = 1000 / (1 + SMPLRT_DIV).
+     * Require an exact integer divider so active runtime config and telemetry
+     * never claim a rate different from the hardware rate actually applied.
+     */
+    if ((sample_rate_hz < 10U) ||
+        (sample_rate_hz > 1000U) ||
+        ((1000U % sample_rate_hz) != 0U))
+    {
+        return false;
+    }
+
+    divider = (uint16_t)((1000U / sample_rate_hz) - 1U);
+    return (divider <= 255U);
+}
+
 void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
 {
     if (config == NULL)
@@ -143,8 +164,7 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         return false;
     }
 
-    if ((config->mpu.sample_rate_hz < 10U) ||
-        (config->mpu.sample_rate_hz > 1000U))
+    if (!IsSupportedMpuSampleRate(config->mpu.sample_rate_hz))
     {
         return false;
     }
