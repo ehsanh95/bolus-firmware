@@ -8,9 +8,11 @@
 
 /*
  * Phase-5 controlled Step Counter characterization.
- * Only ODR is changed from the known-good Bosch/Phase-4 baseline.
+ * ODR is held at the last known-good 12.5 Hz value while only performance
+ * mode is changed from continuous mode to CIC/averaging mode.
  */
-#define BMA456_STEP_CHARACTERIZATION_ODR  BMA4_OUTPUT_DATA_RATE_6_25HZ
+#define BMA456_STEP_CHARACTERIZATION_ODR        BMA4_OUTPUT_DATA_RATE_12_5HZ
+#define BMA456_STEP_CHARACTERIZATION_PERF_MODE  BMA4_CIC_AVG_MODE
 
 /*
  * Phase-5 characterization diagnostics.
@@ -429,9 +431,9 @@ bma456_motion_status_t BMA456Motion_Init(
 
     /*
      * Controlled characterization path for Step Counter:
-     * read the known-good Bosch baseline, modify ONLY ODR, then write the
-     * complete configuration back unchanged otherwise. The baseline observed
-     * on hardware was 100 Hz / AVG4 / continuous mode / +/-4 g / APS enabled.
+     * read the known-good Bosch baseline, keep the last known-good ODR, and
+     * change ONLY accelerometer performance mode. Baseline values for AVG4,
+     * +/-4 g and APS remain untouched.
      */
     if (config->step_counter_enable)
     {
@@ -442,6 +444,7 @@ bma456_motion_status_t BMA456Motion_Init(
         }
 
         accel_config.odr = BMA456_STEP_CHARACTERIZATION_ODR;
+        accel_config.perf_mode = BMA456_STEP_CHARACTERIZATION_PERF_MODE;
 
         result = bma4_set_accel_config(&accel_config, &s_dev);
         if (result != BMA4_OK)
@@ -488,8 +491,8 @@ bma456_motion_status_t BMA456Motion_Init(
     }
 
     /*
-     * Read back the configuration actually active in silicon. This lets the
-     * bench test confirm that only ODR changed during characterization.
+     * Read back the configuration actually active in silicon so the bench test
+     * can verify 12.5 Hz / AVG4 / CIC mode / +/-4 g / APS enabled.
      */
     result = bma4_get_accel_config(&accel_config, &s_dev);
     if ((result != BMA4_OK) ||
