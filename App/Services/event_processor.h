@@ -7,17 +7,22 @@
 #include "../Config/bolus_runtime_config.h"
 
 /*
- * Physical/event flags intentionally precede behavioral diagnoses.
+ * Physical/reference flags intentionally precede behavioral diagnoses.
  * Multiple flags may be present for the same observation.
+ *
+ * *_REFERENCE flags mean "matches a published reference rule", not a
+ * definitive diagnosis for this Bolus hardware/population.
  */
 typedef uint32_t event_processor_flags_t;
 
-#define EVENT_PROCESSOR_FLAG_GENERAL_MOTION          (1UL << 0)
-#define EVENT_PROCESSOR_FLAG_TEMP_DROP_REFERENCE     (1UL << 1)
-#define EVENT_PROCESSOR_FLAG_CONTRACTION_CANDIDATE   (1UL << 2)
-#define EVENT_PROCESSOR_FLAG_CONTRACTION_PERIODICITY (1UL << 3)
-#define EVENT_PROCESSOR_FLAG_HYPERTHERMIA_REFERENCE  (1UL << 4)
-#define EVENT_PROCESSOR_FLAG_ROTATION_CANDIDATE      (1UL << 5)
+#define EVENT_PROCESSOR_FLAG_GENERAL_MOTION              (1UL << 0)
+#define EVENT_PROCESSOR_FLAG_TEMP_DROP_REFERENCE         (1UL << 1)
+#define EVENT_PROCESSOR_FLAG_CONTRACTION_CANDIDATE       (1UL << 2)
+#define EVENT_PROCESSOR_FLAG_CONTRACTION_PERIODICITY     (1UL << 3)
+#define EVENT_PROCESSOR_FLAG_HYPERTHERMIA_REFERENCE      (1UL << 4)
+#define EVENT_PROCESSOR_FLAG_ROTATION_CANDIDATE          (1UL << 5)
+#define EVENT_PROCESSOR_FLAG_DRINK_ABS_TEMP_REFERENCE    (1UL << 6)
+#define EVENT_PROCESSOR_FLAG_SARA_RISK_REFERENCE         (1UL << 7)
 
 typedef enum
 {
@@ -66,8 +71,17 @@ typedef struct
 
     bool contraction_duration_match;
     bool contraction_interval_match;
+
+    /* Preferred drinking evidence: temperature trajectory. */
     bool drinking_5min_reference_match;
     bool drinking_10min_reference_match;
+
+    /* Secondary published absolute-temperature reference only. */
+    bool drinking_absolute_temp_reference_match;
+
+    /* Health-risk references; neither is a diagnosis. */
+    bool hyperthermia_reference_match;
+    bool sara_risk_reference_match;
 
     uint32_t timestamp_s;
 } event_processor_result_t;
