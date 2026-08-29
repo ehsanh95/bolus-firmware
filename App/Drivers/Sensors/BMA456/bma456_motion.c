@@ -7,6 +7,12 @@
 #define BMA456_MOTION_MAX_TRANSFER    64U
 
 /*
+ * Phase-5 controlled Step Counter characterization.
+ * Only ODR is changed from the known-good Bosch/Phase-4 baseline.
+ */
+#define BMA456_STEP_CHARACTERIZATION_ODR  BMA4_OUTPUT_DATA_RATE_50HZ
+
+/*
  * Phase-5 characterization diagnostics.
  *
  * These are intentionally non-static while BMA456 low-power behaviour is
@@ -422,20 +428,28 @@ bma456_motion_status_t BMA456Motion_Init(
     }
 
     /*
-     * IMPORTANT PHASE-5 BENCH BASELINE
-     * --------------------------------
-     * When Step Counter is enabled, preserve the same accelerometer setup used
-     * by the proven Phase-4 wrapper and Bosch step-counter example:
-     *
-     *     init -> config-file -> accel-enable -> step-enable
-     *
-     * We intentionally do not override ODR/bandwidth/range and do not enable
-     * advanced power-save on this path yet. The previous 12.5 Hz / AVG4 /
-     * advanced-power-save experiment returned valid XYZ but a Step Counter
-     * stuck at zero. Low-power tuning will be reintroduced one variable at a
-     * time after the hardware Step Counter baseline passes again.
+     * Controlled characterization path for Step Counter:
+     * read the known-good Bosch baseline, modify ONLY ODR, then write the
+     * complete configuration back unchanged otherwise. The baseline observed
+     * on hardware was 100 Hz / AVG4 / continuous mode / +/-4 g / APS enabled.
      */
-    if (!config->step_counter_enable)
+    if (config->step_counter_enable)
+    {
+        result = bma4_get_accel_config(&accel_config, &s_dev);
+        if (result != BMA4_OK)
+        {
+            return BMA456_MOTION_ERROR_CONFIG;
+        }
+
+        accel_config.odr = BMA456_STEP_CHARACTERIZATION_ODR;
+
+        result = bma4_set_accel_config(&accel_config, &s_dev);
+        if (result != BMA4_OK)
+        {
+            return BMA456_MOTION_ERROR_CONFIG;
+        }
+    }
+    else
     {
         accel_config.odr = bosch_odr;
         accel_config.bandwidth = bosch_bandwidth;
@@ -474,9 +488,8 @@ bma456_motion_status_t BMA456Motion_Init(
     }
 
     /*
-     * Read back the configuration actually active in silicon. This is the
-     * baseline for low-power characterization; no behaviour is changed by the
-     * diagnostic readback itself.
+     * Read back the configuration actually active in silicon. This lets the
+     * bench test confirm that only ODR changed during characterization.
      */
     result = bma4_get_accel_config(&accel_config, &s_dev);
     if ((result != BMA4_OK) ||
