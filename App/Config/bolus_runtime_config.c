@@ -7,6 +7,24 @@ static bool IsPowerOfTwo(uint8_t value)
     return ((value != 0U) && ((value & (uint8_t)(value - 1U)) == 0U));
 }
 
+static bool IsValidatedBmaStepProfile(bolus_bma_step_sensitivity_t profile)
+{
+    /*
+     * Only profiles exercised on the Phase-5 bench are accepted for now:
+     *
+     * DEFAULT : Bosch BMA456H feature-image defaults (observed P5=7, P13=1)
+     * LEVEL_1 : robust endpoint                    (verified P5=10, P13=1)
+     * LEVEL_7 : sensitive endpoint                 (verified P5=4,  P13=0)
+     *
+     * Intermediate mappings remain defined in the type for compatibility, but
+     * RuntimeConfig rejects them until they are characterized or Bosch gives
+     * us authoritative guidance for the full parameter set.
+     */
+    return ((profile == BOLUS_BMA_STEP_SENSITIVITY_DEFAULT) ||
+            (profile == BOLUS_BMA_STEP_SENSITIVITY_LEVEL_1) ||
+            (profile == BOLUS_BMA_STEP_SENSITIVITY_LEVEL_7));
+}
+
 void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
 {
     if (config == NULL)
@@ -34,9 +52,8 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->bma.step_counter_enable = true;
 
     /*
-     * Keep the Bosch feature-engine step parameters at their configuration-file
-     * defaults until rumen/animal data establishes a production calibration.
-     * Levels 1..7 remain available as runtime/downlink experimental profiles.
+     * Keep the Bosch BMA456H feature-image defaults until rumen field data or
+     * Bosch application support justifies selecting a custom profile.
      */
     config->bma.step_sensitivity = BOLUS_BMA_STEP_SENSITIVITY_DEFAULT;
 
@@ -115,7 +132,7 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         return false;
     }
 
-    if (config->bma.step_sensitivity > BOLUS_BMA_STEP_SENSITIVITY_LEVEL_7)
+    if (!IsValidatedBmaStepProfile(config->bma.step_sensitivity))
     {
         return false;
     }
