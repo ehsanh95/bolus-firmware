@@ -111,7 +111,7 @@ bool rfm95w_final_ok = false;
 
 
 /* ============================================================
- * TMP117 debug variables
+ * TMP117 legacy Phase 4 debug variables
  * ============================================================ */
 
 bool tmp117_active = false;
@@ -189,6 +189,26 @@ sensor_service_bma_sample_t bma456_service_sample = {0};
 bool bma456_service_ready = false;
 
 uint32_t bma456_service_last_read_tick = 0U;
+
+/*
+ * ============================================================
+ * Phase 5 TMP117 SensorService bench variables
+ * ============================================================
+ *
+ * The active TMP117 path is now SensorService-owned. The old button-driven
+ * direct-driver path below is compiled out during this bench migration.
+ */
+sensor_service_status_t tmp_service_init_status =
+    SENSOR_SERVICE_ERROR_TMP_INIT;
+
+sensor_service_status_t tmp_service_read_status =
+    SENSOR_SERVICE_ERROR_TMP_READ;
+
+sensor_service_temperature_sample_t tmp_service_sample = {0};
+
+bool tmp_service_ready = false;
+
+uint32_t tmp_service_last_read_tick = 0U;
 
 /* USER CODE END PV */
 
@@ -538,6 +558,33 @@ int main(void)
 
   /*
    * ============================================================
+   * Phase 5 TMP117 SensorService bench initialization
+   * ============================================================
+   *
+   * This is now the only active TMP117 path. The service powers the sensor,
+   * verifies Device ID, configures AVG1, leaves the device in shutdown, then
+   * performs a bounded one-shot conversion for the first sample.
+   */
+  tmp_service_init_status =
+      SensorService_InitTemperature(
+          &hi2c3,
+          &bma456_service_config);
+
+  tmp_service_ready =
+      ((tmp_service_init_status == SENSOR_SERVICE_OK) &&
+       SensorService_IsTemperatureReady());
+
+  if (tmp_service_ready)
+  {
+      tmp_service_read_status =
+          SensorService_ReadTemperatureOneShot(
+              &tmp_service_sample);
+
+      tmp_service_last_read_tick = HAL_GetTick();
+  }
+
+  /*
+   * ============================================================
    * RFM95W / SX1276 Phase 4 FINAL TEST
    * ============================================================
    *
@@ -775,6 +822,26 @@ int main(void)
 	      }
 	  }
 
+	  /*
+	   * ------------------------------------------------------------
+	   * Phase 5 TMP117 SensorService bench polling
+	   * ------------------------------------------------------------
+	   *
+	   * 2 s is a bench-only interval. Each call still performs exactly one
+	   * conversion and returns the TMP117 to shutdown before the next interval.
+	   */
+	  if (tmp_service_ready)
+	  {
+	      if ((HAL_GetTick() - tmp_service_last_read_tick) >= 2000U)
+	      {
+	          tmp_service_last_read_tick = HAL_GetTick();
+
+	          tmp_service_read_status =
+	              SensorService_ReadTemperatureOneShot(
+	                  &tmp_service_sample);
+	      }
+	  }
+
 	  GPIO_PinState button_state =
 	      HAL_GPIO_ReadPin(
 	          BUTTON_GPIO_Port,
@@ -805,7 +872,8 @@ int main(void)
 	           * ====================================================
 	           * FIRST PRESS
 	           *
-	           * Power ON + Init MPU6050 and TMP117
+	           * Power ON + Init MPU6050. TMP117 is now owned by
+	           * SensorService and is intentionally excluded here.
 	           * ====================================================
 	           */
 
@@ -901,11 +969,14 @@ int main(void)
 	                      BOLUS_POWER_MPU6050);
 	              }
 
-
+#if 0
 	              /*
-	               * ================================================
-	               * TMP117
-	               * ================================================
+	               * ============================================================
+	               * Legacy Phase 4 TMP117 direct-driver bench path
+	               * ============================================================
+	               * Disabled during Phase 5 migration. SensorService is the
+	               * only active TMP117 owner; this block is kept temporarily as
+	               * bring-up history until the migration is accepted on bench.
 	               */
 
 	              tmp117_init_ok = false;
@@ -1009,10 +1080,11 @@ int main(void)
 
 	                  tmp117_active = false;
 	              }
+#endif
 
 
 	              /*
-	               * At least one sensor started successfully.
+	               * At least one button-controlled sensor started successfully.
 	               */
 	              if (mpu_active ||
 	                  tmp117_active)
@@ -1030,7 +1102,7 @@ int main(void)
 	              else
 	              {
 	                  /*
-	                   * Both sensors failed.
+	                   * Button-controlled sensor startup failed.
 	                   *
 	                   * Two short blinks.
 	                   */
@@ -1090,13 +1162,12 @@ int main(void)
 	                  mpu_bus_ok = false;
 	              }
 
-
+#if 0
 	              /*
-	               * ================================================
-	               * TMP117 OFF
-	               * ================================================
+	               * Legacy TMP117 OFF path disabled with the direct-driver
+	               * startup path above. SensorService keeps TMP117 in shutdown
+	               * between one-shot conversions.
 	               */
-
 	              if (tmp117_active)
 	              {
 	                  tmp117_shutdown_ok =
@@ -1115,6 +1186,7 @@ int main(void)
 
 	                  tmp117_active = false;
 	              }
+#endif
 
 
 	              /*
@@ -1165,10 +1237,13 @@ int main(void)
 	      }
 	  }
 
-
+#if 0
 	  /* ============================================================
-	   * Live TMP117 sampling
-	   * ============================================================ */
+	   * Legacy live TMP117 direct-driver sampling
+	   * ============================================================
+	   * Disabled: Phase 5 TMP117 acquisition is handled above by
+	   * SensorService_ReadTemperatureOneShot().
+	   */
 
 	  if (tmp117_active)
 	  {
@@ -1186,6 +1261,7 @@ int main(void)
 	              HAL_GetTick();
 	      }
 	  }
+#endif
 
 
 	  /* ============================================================
