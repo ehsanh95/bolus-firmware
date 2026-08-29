@@ -34,10 +34,11 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->bma.step_counter_enable = true;
 
     /*
-     * Keep Bosch default step parameters until we intentionally choose a
-     * Bolus sensitivity profile during bench/field calibration.
+     * Phase-5 bench characterization: exercise the middle Bolus sensitivity
+     * profile while keeping the proven 12.5 Hz / continuous-mode step path.
+     * Field trials will later select the production profile through downlink.
      */
-    config->bma.step_sensitivity = BOLUS_BMA_STEP_SENSITIVITY_DEFAULT;
+    config->bma.step_sensitivity = BOLUS_BMA_STEP_SENSITIVITY_LEVEL_4;
 
     config->bma.fifo_enable = true;
     config->bma.motion_interrupt_enable = false;
