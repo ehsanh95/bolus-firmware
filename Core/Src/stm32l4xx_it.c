@@ -32,6 +32,15 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+/*
+ * Diagnostic only. Production code must feed the watchdog from the application
+ * health path, not blindly from SysTick. 100 ms is deliberately much shorter
+ * than the current ~1 s IWDG timeout so we can prove whether watchdog starvation
+ * is causing the observed reset loop while still allowing hard faults/disabled
+ * interrupts to reset the MCU.
+ */
+#define BOLUS_IWDG_DIAG_SYSTICK_REFRESH_MS  100U
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -41,6 +50,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
+
+volatile uint32_t iwdg_diag_systick_refresh_count = 0U;
 
 /* USER CODE END PV */
 
@@ -57,6 +68,8 @@
 /* External variables --------------------------------------------------------*/
 
 /* USER CODE BEGIN EV */
+
+extern IWDG_HandleTypeDef hiwdg;
 
 /* USER CODE END EV */
 
@@ -187,6 +200,22 @@ void SysTick_Handler(void)
   /* USER CODE END SysTick_IRQn 0 */
   HAL_IncTick();
   /* USER CODE BEGIN SysTick_IRQn 1 */
+
+  /*
+   * TEMPORARY RESET-LOOP DIAGNOSTIC ONLY.
+   *
+   * If the board becomes stable with this enabled, the reset source is watchdog
+   * starvation in the application/init path rather than sensor power-gate
+   * settling itself. This must be removed once the offending blocking path is
+   * identified; feeding IWDG unconditionally from SysTick is not an acceptable
+   * production watchdog architecture.
+   */
+  if ((hiwdg.Instance == IWDG) &&
+      ((HAL_GetTick() % BOLUS_IWDG_DIAG_SYSTICK_REFRESH_MS) == 0U))
+  {
+    (void)HAL_IWDG_Refresh(&hiwdg);
+    iwdg_diag_systick_refresh_count++;
+  }
 
   /* USER CODE END SysTick_IRQn 1 */
 }
