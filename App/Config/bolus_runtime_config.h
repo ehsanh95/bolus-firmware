@@ -15,7 +15,7 @@
  * Sensor/Radio service APIs.
  */
 
-#define BOLUS_RUNTIME_CONFIG_VERSION  2U
+#define BOLUS_RUNTIME_CONFIG_VERSION  3U
 
 typedef enum
 {
@@ -30,6 +30,15 @@ typedef enum
     BOLUS_BMA_ODR_25_HZ,
     BOLUS_BMA_ODR_50_HZ
 } bolus_bma_odr_t;
+
+typedef enum
+{
+    /* Published literature values are used only as research benchmarks. */
+    BOLUS_EVENT_RULES_REFERENCE_BENCHMARK = 0,
+
+    /* Values have been replaced/tuned from synchronized Bolus field data. */
+    BOLUS_EVENT_RULES_FIELD_CALIBRATED
+} bolus_event_rule_source_t;
 
 typedef struct
 {
@@ -49,7 +58,7 @@ typedef struct
 
     /*
      * The BMA456 stays powered during normal low-power operation.
-     * Its native Step Counter is a primary candidate gastric-movement metric.
+     * Its native Step Counter is an experimental generic activity metric.
      */
     bool step_counter_enable;
     bolus_bma_step_sensitivity_t step_sensitivity;
@@ -68,6 +77,41 @@ typedef struct
     bool event_trigger_enable;
 } bolus_mpu_config_t;
 
+/*
+ * Multi-timescale event-processing policy.
+ *
+ * IMPORTANT:
+ * - bma_event_sensitivity_level is independent from BMA Step Counter
+ *   sensitivity. 0 means "leave the event detector at its hardware/default
+ *   development setting"; 1..7 is the future Bolus/downlink calibration
+ *   scale. The BMA driver mapping is deliberately implemented separately.
+ * - Published numerical values below are reference benchmarks, not universal
+ *   cattle thresholds. V1 event outputs must preserve the rule_source so the
+ *   backend can distinguish literature-reference matches from field-calibrated
+ *   decisions.
+ */
+typedef struct
+{
+    bool enable;
+    bolus_event_rule_source_t rule_source;
+
+    uint8_t bma_event_sensitivity_level;
+    uint16_t bma_event_cooldown_s;
+
+    /* Published drinking trajectory reference values. */
+    uint16_t drinking_drop_5min_mdeg_c;
+    uint16_t drinking_drop_10min_mdeg_c;
+
+    /* Direct intrareticular contraction timing evidence. */
+    uint16_t contraction_duration_min_ms;
+    uint16_t contraction_duration_max_ms;
+    uint16_t contraction_interval_min_s;
+    uint16_t contraction_interval_max_s;
+
+    /* Cohort/study benchmark only; not a disease diagnosis threshold. */
+    int32_t hyperthermia_reference_mdeg_c;
+} bolus_event_processing_config_t;
+
 typedef struct
 {
     uint32_t uplink_period_s;
@@ -85,6 +129,7 @@ typedef struct
     bolus_temperature_config_t temperature;
     bolus_bma_config_t bma;
     bolus_mpu_config_t mpu;
+    bolus_event_processing_config_t event_processing;
     bolus_radio_config_t radio;
 } bolus_runtime_config_t;
 
