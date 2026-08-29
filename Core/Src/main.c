@@ -169,12 +169,14 @@ static HAL_StatusTypeDef BMA456_RawReadRegister(uint8_t reg, uint8_t *value)
 }
 
 /*
- * ISR callback stays deliberately tiny. No SPI/I2C/power sequencing occurs in
- * interrupt context; main/thread context confirms the BMA feature status and
- * performs the multisensor acquisition.
+ * One project-wide HAL EXTI callback dispatches to each owner. The RFM95W
+ * board handler preserves existing DIO0/1/2 behavior; the BMA path remains
+ * deliberately tiny and only records pending work for main/thread context.
  */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+    RFM95W_Board_HandleExti(GPIO_Pin);
+
     if (GPIO_Pin == PEDO_INT1_Pin)
     {
         bma_event_irq_tick_ms = HAL_GetTick();
