@@ -34,11 +34,11 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->bma.step_counter_enable = true;
 
     /*
-     * Phase-5 bench characterization: exercise the most-sensitive Bolus
-     * profile while keeping the proven 12.5 Hz / continuous-mode step path.
-     * The BMA feature-engine readback should confirm param5=4, param13=0.
+     * Keep the Bosch feature-engine step parameters at their configuration-file
+     * defaults until rumen/animal data establishes a production calibration.
+     * Levels 1..7 remain available as runtime/downlink experimental profiles.
      */
-    config->bma.step_sensitivity = BOLUS_BMA_STEP_SENSITIVITY_LEVEL_7;
+    config->bma.step_sensitivity = BOLUS_BMA_STEP_SENSITIVITY_DEFAULT;
 
     config->bma.fifo_enable = true;
     config->bma.motion_interrupt_enable = false;
