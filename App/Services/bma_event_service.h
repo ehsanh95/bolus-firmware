@@ -30,6 +30,7 @@ typedef struct
 
 /* Phase-5 Live Expressions: resolved policy and cooldown behavior. */
 extern bolus_bma_event_sensitivity_t bma_event_service_diag_profile;
+extern bool bma_event_service_diag_interrupt_enabled;
 extern uint16_t bma_event_service_diag_threshold_mg;
 extern uint16_t bma_event_service_diag_duration_ms;
 extern uint16_t bma_event_service_diag_cooldown_s;
