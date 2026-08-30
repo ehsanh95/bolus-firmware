@@ -6,12 +6,16 @@
 #include "bolus_power.h"
 #include "fault_manager.h"
 
+#include <limits.h>
+#include <string.h>
+
 #define SENSOR_SERVICE_BMA_POWER_STABILIZE_MS    10U
 #define SENSOR_SERVICE_TMP_POWER_STABILIZE_MS    10U
 #define SENSOR_SERVICE_TMP_POLL_MS                2U
 #define SENSOR_SERVICE_TMP_DEVICE_ID_EXPECTED     0x0117U
 #define SENSOR_SERVICE_TMP_DRDY_MASK              (1U << 13)
 #define SENSOR_SERVICE_MPU_POWER_STABILIZE_MS    10U
+#define SENSOR_SERVICE_GRAVITY_MG                 1000UL
 
 static bool s_bma_ready = false;
 static bool s_bma_step_enabled = false;
@@ -30,6 +34,81 @@ static uint32_t s_tmp_conversion_timeout_ms = 50U;
 static bool s_mpu_ready = false;
 static I2C_HandleTypeDef *s_mpu_i2c = NULL;
 static mpu6050_motion_config_t s_mpu_config = {0};
+static uint16_t s_mpu_burst_duration_ms = 250U;
+static bool s_mpu_event_trigger_enable = false;
+
+static uint32_t IntegerSqrtU64(uint64_t value)
+{
+    uint64_t result = 0U;
+    uint64_t bit = (uint64_t)1U << 62;
+
+    while (bit > value)
+    {
+        bit >>= 2;
+    }
+
+    while (bit != 0U)
+    {
+        if (value >= (result + bit))
+        {
+            value -= result + bit;
+            result = (result >> 1) + bit;
+        }
+        else
+        {
+            result >>= 1;
+        }
+
+        bit >>= 2;
+    }
+
+    return (result > UINT32_MAX) ? UINT32_MAX : (uint32_t)result;
+}
+
+static uint16_t SaturateU16(uint32_t value)
+{
+    return (value > UINT16_MAX) ? UINT16_MAX : (uint16_t)value;
+}
+
+static int16_t SaturateS16(int32_t value)
+{
+    if (value > INT16_MAX)
+    {
+        return INT16_MAX;
+    }
+
+    if (value < INT16_MIN)
+    {
+        return INT16_MIN;
+    }
+
+    return (int16_t)value;
+}
+
+static int32_t WrapAngleDeltaMdeg(int32_t delta_mdeg)
+{
+    while (delta_mdeg > 180000L)
+    {
+        delta_mdeg -= 360000L;
+    }
+
+    while (delta_mdeg < -180000L)
+    {
+        delta_mdeg += 360000L;
+    }
+
+    return delta_mdeg;
+}
+
+static uint32_t VectorMagnitude3(int32_t x, int32_t y, int32_t z)
+{
+    uint64_t sum_sq =
+        ((uint64_t)((int64_t)x * (int64_t)x)) +
+        ((uint64_t)((int64_t)y * (int64_t)y)) +
+        ((uint64_t)((int64_t)z * (int64_t)z));
+
+    return IntegerSqrtU64(sum_sq);
+}
 
 static bool MapBmaOdr(
     bolus_bma_odr_t odr,
@@ -148,12 +227,6 @@ sensor_service_status_t SensorService_InitBma(
     s_bma_last_step_total = 0U;
     s_bma_step_sensitivity = config->bma.step_sensitivity;
 
-    /*
-     * Temporary Phase 5 power ownership:
-     * SensorService controls the BMA rail directly until PowerService is
-     * introduced. In normal product operation the BMA rail stays on while
-     * the MCU sleeps.
-     */
     BolusPower_On(BOLUS_POWER_BMA456);
     HAL_Delay(SENSOR_SERVICE_BMA_POWER_STABILIZE_MS);
 
@@ -220,13 +293,11 @@ sensor_service_status_t SensorService_ReadBmaSample(
 
         if (s_bma_step_baseline_valid)
         {
-            /* Unsigned subtraction intentionally handles uint32 wraparound. */
             sample->step_delta =
                 current_step_total - s_bma_last_step_total;
         }
         else
         {
-            /* First successful read establishes the interval baseline. */
             sample->step_delta = 0U;
             s_bma_step_baseline_valid = true;
         }
@@ -278,11 +349,6 @@ sensor_service_status_t SensorService_InitTemperature(
     s_tmp_averaging_samples = config->temperature.averaging_samples;
     s_tmp_conversion_timeout_ms = conversion_timeout_ms;
 
-    /*
-     * Temporary Phase-5 power policy: keep the rail powered and put TMP117 in
-     * shutdown between one-shot conversions. PowerService later decides
-     * whether rail-off gives a worthwhile system-level leakage improvement.
-     */
     BolusPower_On(BOLUS_POWER_TMP117);
     HAL_Delay(SENSOR_SERVICE_TMP_POWER_STABILIZE_MS);
 
@@ -389,7 +455,6 @@ sensor_service_status_t SensorService_ReadTemperatureOneShot(
         return SENSOR_SERVICE_ERROR_TMP_READ;
     }
 
-    /* Trigger a single conversion from shutdown. */
     ok = TMP117_setConversionMode(
         s_tmp_i2c,
         s_tmp_buffer,
@@ -401,11 +466,6 @@ sensor_service_status_t SensorService_ReadTemperatureOneShot(
         return SENSOR_SERVICE_ERROR_TMP_READ;
     }
 
-    /*
-     * Bounded wait for Data Ready. Normal AVG1 completes in about 15.5 ms;
-     * larger averaging modes are allowed by RuntimeConfig and have explicit
-     * finite timeouts here so a failed sensor cannot hold the system hostage.
-     */
     start_tick = HAL_GetTick();
 
     while (true)
@@ -450,7 +510,6 @@ sensor_service_status_t SensorService_ReadTemperatureOneShot(
         s_tmp_buffer,
         &temperature_c);
 
-    /* Explicitly return to shutdown even though one-shot is self-terminating. */
     (void)TMP117_setConversionMode(
         s_tmp_i2c,
         s_tmp_buffer,
@@ -462,7 +521,6 @@ sensor_service_status_t SensorService_ReadTemperatureOneShot(
         return SENSOR_SERVICE_ERROR_TMP_READ;
     }
 
-    /* TMP117 specified operating range: reject obvious corrupted values. */
     if ((temperature_c < -55.0) || (temperature_c > 150.0))
     {
         FaultManager_Raise(BOLUS_FAULT_TMP117_INVALID_DATA);
@@ -507,11 +565,9 @@ sensor_service_status_t SensorService_InitMpu(
     s_mpu_config.sample_rate_hz = config->mpu.sample_rate_hz;
     s_mpu_config.accel_range_g = config->mpu.accel_range_g;
     s_mpu_config.gyro_range_dps = config->mpu.gyro_range_dps;
+    s_mpu_burst_duration_ms = config->mpu.burst_duration_ms;
+    s_mpu_event_trigger_enable = config->mpu.event_trigger_enable;
 
-    /*
-     * Verify the complete MPU path once, then physically power it back OFF.
-     * Every later burst re-applies configuration after rail power-up.
-     */
     BolusPower_On(BOLUS_POWER_MPU6050);
     HAL_Delay(SENSOR_SERVICE_MPU_POWER_STABILIZE_MS);
 
@@ -561,10 +617,6 @@ sensor_service_status_t SensorService_ReadMpuSample(
         return SENSOR_SERVICE_ERROR_MPU_READ;
     }
 
-    /*
-     * MPU6050 is normally rail-OFF. A detailed acquisition is an explicit
-     * power-up/configure/wake/sample/sleep/power-off transaction.
-     */
     BolusPower_On(BOLUS_POWER_MPU6050);
     HAL_Delay(SENSOR_SERVICE_MPU_POWER_STABILIZE_MS);
 
@@ -601,6 +653,226 @@ sensor_service_status_t SensorService_ReadMpuSample(
     sample->sample_rate_hz = s_mpu_config.sample_rate_hz;
     sample->accel_range_g = s_mpu_config.accel_range_g;
     sample->gyro_range_dps = s_mpu_config.gyro_range_dps;
+
+    (void)FaultManager_ClearFault(BOLUS_FAULT_MPU6050_INIT);
+    (void)FaultManager_ClearFault(BOLUS_FAULT_MPU6050_COMM);
+    (void)FaultManager_ClearFault(BOLUS_FAULT_MPU6050_TIMEOUT);
+
+    return SENSOR_SERVICE_OK;
+}
+
+sensor_service_status_t SensorService_ReadMpuBurst(
+    sensor_service_mpu_burst_features_t *features)
+{
+    mpu6050_motion_status_t status = MPU6050_MOTION_ERROR_NOT_READY;
+    mpu6050_motion_status_t end_status;
+    mpu6050_motion_sample_t sample = {0};
+    uint32_t target_samples;
+    uint32_t sample_interval_ms;
+    uint32_t next_sample_tick;
+    uint32_t previous_sample_tick = 0U;
+    uint64_t dynamic_sum_sq_mg2 = 0U;
+    uint64_t gyro_sum_sq_mdps2 = 0U;
+    uint64_t total_angular_motion_cdeg = 0U;
+    uint32_t peak_dynamic_mg = 0U;
+    uint32_t peak_gyro_mdps = 0U;
+    uint16_t sample_count = 0U;
+    bool first_orientation_valid = false;
+    bool last_orientation_valid = false;
+    int32_t first_roll_mdeg = 0;
+    int32_t first_pitch_mdeg = 0;
+    int32_t last_roll_mdeg = 0;
+    int32_t last_pitch_mdeg = 0;
+    bool burst_started = false;
+
+    if (features == NULL)
+    {
+        return SENSOR_SERVICE_ERROR_PARAM;
+    }
+
+    memset(features, 0, sizeof(*features));
+
+    if ((!s_mpu_ready) || (s_mpu_i2c == NULL))
+    {
+        FaultManager_Raise(BOLUS_FAULT_MPU6050_INIT);
+        return SENSOR_SERVICE_ERROR_MPU_READ;
+    }
+
+    if (!s_mpu_event_trigger_enable)
+    {
+        return SENSOR_SERVICE_ERROR_CONFIG;
+    }
+
+    features->configured_duration_ms = s_mpu_burst_duration_ms;
+    features->sample_rate_hz = s_mpu_config.sample_rate_hz;
+    features->accel_range_g = s_mpu_config.accel_range_g;
+    features->gyro_range_dps = s_mpu_config.gyro_range_dps;
+
+    target_samples =
+        ((uint32_t)s_mpu_burst_duration_ms * (uint32_t)s_mpu_config.sample_rate_hz) /
+        1000UL;
+
+    if (target_samples == 0U)
+    {
+        target_samples = 1U;
+    }
+
+    if (target_samples > UINT16_MAX)
+    {
+        target_samples = UINT16_MAX;
+    }
+
+    sample_interval_ms = 1000UL / (uint32_t)s_mpu_config.sample_rate_hz;
+    if (sample_interval_ms == 0U)
+    {
+        sample_interval_ms = 1U;
+    }
+
+    /* One power-up/configure cycle for the whole burst. */
+    BolusPower_On(BOLUS_POWER_MPU6050);
+    HAL_Delay(SENSOR_SERVICE_MPU_POWER_STABILIZE_MS);
+
+    status = MPU6050Motion_Init(s_mpu_i2c, &s_mpu_config);
+    if (status == MPU6050_MOTION_OK)
+    {
+        status = MPU6050Motion_BeginBurst();
+        burst_started = (status == MPU6050_MOTION_OK);
+    }
+
+    next_sample_tick = HAL_GetTick();
+
+    while ((status == MPU6050_MOTION_OK) &&
+           ((uint32_t)sample_count < target_samples))
+    {
+        uint32_t sample_tick;
+        uint32_t accel_mag_mg;
+        uint32_t dynamic_mg;
+        uint32_t gyro_mag_mdps;
+
+        while ((int32_t)(HAL_GetTick() - next_sample_tick) < 0)
+        {
+            HAL_Delay(1U);
+        }
+
+        status = MPU6050Motion_ReadBurstSample(&sample);
+        if (status != MPU6050_MOTION_OK)
+        {
+            break;
+        }
+
+        sample_tick = HAL_GetTick();
+
+        accel_mag_mg = VectorMagnitude3(
+            sample.accel_x_mg,
+            sample.accel_y_mg,
+            sample.accel_z_mg);
+        dynamic_mg =
+            (accel_mag_mg >= SENSOR_SERVICE_GRAVITY_MG)
+                ? (accel_mag_mg - SENSOR_SERVICE_GRAVITY_MG)
+                : (SENSOR_SERVICE_GRAVITY_MG - accel_mag_mg);
+
+        gyro_mag_mdps = VectorMagnitude3(
+            sample.gyro_x_mdps,
+            sample.gyro_y_mdps,
+            sample.gyro_z_mdps);
+
+        if (dynamic_mg > peak_dynamic_mg)
+        {
+            peak_dynamic_mg = dynamic_mg;
+        }
+
+        if (gyro_mag_mdps > peak_gyro_mdps)
+        {
+            peak_gyro_mdps = gyro_mag_mdps;
+        }
+
+        dynamic_sum_sq_mg2 +=
+            (uint64_t)dynamic_mg * (uint64_t)dynamic_mg;
+        gyro_sum_sq_mdps2 +=
+            (uint64_t)gyro_mag_mdps * (uint64_t)gyro_mag_mdps;
+
+        if (sample_count > 0U)
+        {
+            uint32_t dt_ms = sample_tick - previous_sample_tick;
+            total_angular_motion_cdeg +=
+                ((uint64_t)gyro_mag_mdps * (uint64_t)dt_ms) / 10000ULL;
+        }
+
+        if (mpu6050_diag_orientation_valid)
+        {
+            if (!first_orientation_valid)
+            {
+                first_orientation_valid = true;
+                first_roll_mdeg = mpu6050_diag_roll_mdeg;
+                first_pitch_mdeg = mpu6050_diag_pitch_mdeg;
+            }
+
+            last_orientation_valid = true;
+            last_roll_mdeg = mpu6050_diag_roll_mdeg;
+            last_pitch_mdeg = mpu6050_diag_pitch_mdeg;
+        }
+
+        previous_sample_tick = sample_tick;
+        sample_count++;
+        next_sample_tick += sample_interval_ms;
+    }
+
+    if (burst_started || MPU6050Motion_IsBurstActive())
+    {
+        end_status = MPU6050Motion_EndBurst();
+        if ((status == MPU6050_MOTION_OK) &&
+            (end_status != MPU6050_MOTION_OK))
+        {
+            status = end_status;
+        }
+    }
+    else if (MPU6050Motion_IsReady())
+    {
+        (void)MPU6050Motion_Sleep();
+    }
+
+    /* Physical rail OFF is mandatory even on read/config failure. */
+    BolusPower_Off(BOLUS_POWER_MPU6050);
+
+    if ((status != MPU6050_MOTION_OK) || (sample_count == 0U))
+    {
+        FaultManager_Raise(BOLUS_FAULT_MPU6050_COMM);
+        return SENSOR_SERVICE_ERROR_MPU_READ;
+    }
+
+    features->sample_count = sample_count;
+    features->peak_dynamic_accel_mg = SaturateU16(peak_dynamic_mg);
+    features->rms_dynamic_accel_mg = SaturateU16(
+        IntegerSqrtU64(dynamic_sum_sq_mg2 / (uint64_t)sample_count));
+
+    features->peak_angular_velocity_dps = SaturateU16(
+        (peak_gyro_mdps + 500UL) / 1000UL);
+    features->rms_angular_velocity_dps = SaturateU16(
+        (IntegerSqrtU64(gyro_sum_sq_mdps2 / (uint64_t)sample_count) + 500UL) /
+        1000UL);
+
+    features->total_angular_motion_cdeg =
+        (total_angular_motion_cdeg > UINT32_MAX)
+            ? UINT32_MAX
+            : (uint32_t)total_angular_motion_cdeg;
+
+    if (first_orientation_valid && last_orientation_valid)
+    {
+        int32_t roll_delta_mdeg =
+            WrapAngleDeltaMdeg(last_roll_mdeg - first_roll_mdeg);
+        int32_t pitch_delta_mdeg =
+            WrapAngleDeltaMdeg(last_pitch_mdeg - first_pitch_mdeg);
+        uint32_t orientation_change_mdeg = VectorMagnitude3(
+            roll_delta_mdeg,
+            pitch_delta_mdeg,
+            0);
+
+        features->orientation_change_valid = true;
+        features->roll_change_cdeg = SaturateS16(roll_delta_mdeg / 10L);
+        features->pitch_change_cdeg = SaturateS16(pitch_delta_mdeg / 10L);
+        features->orientation_change_cdeg =
+            SaturateU16((orientation_change_mdeg + 5UL) / 10UL);
+    }
 
     (void)FaultManager_ClearFault(BOLUS_FAULT_MPU6050_INIT);
     (void)FaultManager_ClearFault(BOLUS_FAULT_MPU6050_COMM);
