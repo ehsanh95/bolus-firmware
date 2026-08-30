@@ -9,17 +9,6 @@ static bool IsPowerOfTwo(uint8_t value)
 
 static bool IsValidatedBmaStepProfile(bolus_bma_step_sensitivity_t profile)
 {
-    /*
-     * Only profiles exercised on the Phase-5 bench are accepted for now:
-     *
-     * DEFAULT : Bosch BMA456H feature-image defaults (observed P5=7, P13=1)
-     * LEVEL_1 : robust endpoint                    (verified P5=10, P13=1)
-     * LEVEL_7 : sensitive endpoint                 (verified P5=4,  P13=0)
-     *
-     * Intermediate mappings remain defined in the type for compatibility, but
-     * RuntimeConfig rejects them until they are characterized or Bosch gives
-     * us authoritative guidance for the full parameter set.
-     */
     return ((profile == BOLUS_BMA_STEP_SENSITIVITY_DEFAULT) ||
             (profile == BOLUS_BMA_STEP_SENSITIVITY_LEVEL_1) ||
             (profile == BOLUS_BMA_STEP_SENSITIVITY_LEVEL_7));
@@ -29,12 +18,6 @@ static bool IsSupportedMpuSampleRate(uint16_t sample_rate_hz)
 {
     uint16_t divider;
 
-    /*
-     * With DLPF enabled the MPU6050 internal sample clock is 1 kHz and:
-     * sample_rate = 1000 / (1 + SMPLRT_DIV).
-     * Require an exact integer divider so active runtime config and telemetry
-     * never claim a rate different from the hardware rate actually applied.
-     */
     if ((sample_rate_hz < 10U) ||
         (sample_rate_hz > 1000U) ||
         ((1000U % sample_rate_hz) != 0U))
@@ -58,7 +41,6 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->version = BOLUS_RUNTIME_CONFIG_VERSION;
     config->operating_mode = BOLUS_MODE_NORMAL;
 
-    /* TMP117: periodic one-shot by default. */
     config->temperature.sample_period_s = 600U;
     config->temperature.strategy = BOLUS_TEMP_STRATEGY_PERIODIC;
     config->temperature.averaging_samples = 1U;
@@ -66,67 +48,32 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->temperature.high_limit_centi_c = 4100;
     config->temperature.low_limit_centi_c = 3500;
 
-    /* BMA456: low-power continuous rumen-motion sentinel. */
     config->bma.odr = BOLUS_BMA_ODR_12_5_HZ;
     config->bma.range_g = 4U;
     config->bma.averaging_samples = 4U;
     config->bma.step_counter_enable = true;
-
-    /*
-     * Keep the Bosch BMA456H feature-image defaults until rumen field data or
-     * Bosch application support justifies selecting a custom profile.
-     */
     config->bma.step_sensitivity = BOLUS_BMA_STEP_SENSITIVITY_DEFAULT;
-
     config->bma.fifo_enable = true;
     config->bma.motion_interrupt_enable = true;
 
-    /* MPU6050: short detailed burst; event triggering is enabled later. */
+    /*
+     * Version 10 development default:
+     * each accepted Event Episode motion pulse may trigger one short, power-
+     * gated MPU6050 burst. 250 ms at 100 Hz yields about 25 samples after one
+     * wake/stabilization, which is intentionally far cheaper than a continuous
+     * or 1-second burst. Hardware validation is still pending.
+     */
     config->mpu.scheduled_period_s = 900U;
-    config->mpu.burst_duration_ms = 1000U;
+    config->mpu.burst_duration_ms = 250U;
     config->mpu.sample_rate_hz = 100U;
     config->mpu.accel_range_g = 4U;
     config->mpu.gyro_range_dps = 500U;
-    config->mpu.event_trigger_enable = false;
+    config->mpu.event_trigger_enable = true;
 
-    /*
-     * Event-processing defaults are engineering/reference starting points.
-     * They remain in RuntimeConfig so future downlink/field calibration can
-     * replace them without rewriting the services.
-     *
-     * BMA Any-Motion:
-     * - LEVEL_2 remains the first in-animal threshold/duration default:
-     *   500 mg / 400 ms.
-     * - bundled profiles span 300..900 mg for calibration.
-     * - Version 9 removes long bundled cooldowns because individual BMA pulses
-     *   are now grouped by EventEpisodeService instead.
-     *
-     * Event Episode:
-     * - the first accepted pulse starts an episode;
-     * - accepted pulses keep the same episode open;
-     * - 120 s without an accepted pulse closes the episode;
-     * - a 2 s retrigger guard prevents overlapping/chatter pulses while keeping
-     *   physiological 40..60 s timing visible;
-     * - first-pulse thermal follow-up is scheduled at +5/+15/+35/+65 s;
-     * - pulse #2 cancels the remaining schedule; later pulses request immediate
-     *   TMP samples instead.
-     *
-     * Drinking:
-     * - published fall methods use 0.5 C / 5 min and 0.5 C / 10 min scales.
-     * - 38.1 C is retained as a weaker published absolute-temperature rule.
-     * Contractions:
-     * - direct intrareticular studies show approximately 8-10 s morphology
-     *   and roughly 40-60 s inter-contraction timing.
-     * Health references:
-     * - 40.0 C is a cohort-level hyperthermia benchmark.
-     * - 39.4 C is an association reported with low-pH/SARA-risk periods and
-     *   must never be treated as a standalone SARA diagnosis.
-     */
     config->event_processing.enable = true;
     config->event_processing.rule_source =
         BOLUS_EVENT_RULES_REFERENCE_BENCHMARK;
 
-    /* Completely independent from Step Counter sensitivity. */
     config->event_processing.bma_event_sensitivity_level =
         BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_2;
     config->event_processing.bma_event_threshold_mg = 0U;
@@ -152,7 +99,6 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->event_processing.hyperthermia_reference_mdeg_c = 40000L;
     config->event_processing.sara_risk_reference_mdeg_c = 39400L;
 
-    /* Radio defaults remain conservative development values. */
     config->radio.uplink_period_s = 900U;
     config->radio.tx_power_dbm = 10;
     config->radio.spreading_factor = 7U;
@@ -223,8 +169,12 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         return false;
     }
 
+    /*
+     * Short event bursts only in Version 10. This keeps one event below the
+     * watchdog/energy envelope while the real board remains uncharacterized.
+     */
     if ((config->mpu.burst_duration_ms < 100U) ||
-        (config->mpu.burst_duration_ms > 10000U))
+        (config->mpu.burst_duration_ms > 500U))
     {
         return false;
     }
@@ -262,7 +212,6 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         return false;
     }
 
-    /* Bundled profiles and OFF must not carry hidden RAW overrides. */
     if ((config->event_processing.bma_event_sensitivity_level !=
          BOLUS_BMA_EVENT_SENSITIVITY_RAW) &&
         ((config->event_processing.bma_event_threshold_mg != 0U) ||
@@ -277,7 +226,6 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         return false;
     }
 
-    /* Bosch Any-Motion duration is represented exactly in 20 ms units. */
     if ((config->event_processing.bma_event_duration_ms != 0U) &&
         (((config->event_processing.bma_event_duration_ms % 20U) != 0U) ||
          (config->event_processing.bma_event_duration_ms > 60000U)))
