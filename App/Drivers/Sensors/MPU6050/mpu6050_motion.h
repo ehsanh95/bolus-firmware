@@ -35,6 +35,13 @@ typedef struct
     int32_t temperature_mdeg_c;
 } mpu6050_motion_sample_t;
 
+/* Phase-5 orientation diagnostics derived from the most recent accel sample. */
+extern bool mpu6050_diag_orientation_valid;
+extern int32_t mpu6050_diag_roll_mdeg;
+extern int32_t mpu6050_diag_pitch_mdeg;
+extern int32_t mpu6050_diag_tilt_mdeg;
+extern bool mpu6050_diag_absolute_yaw_available;
+
 /*
  * Configure and verify one powered MPU6050 instance.
  * The rail must already be ON. The function leaves the device in SLEEP.
@@ -44,15 +51,29 @@ mpu6050_motion_status_t MPU6050Motion_Init(
     const mpu6050_motion_config_t *config);
 
 /*
- * Wake, allow the gyro path to stabilize, acquire one bounded 14-byte sample,
- * then return the device to SLEEP. The rail remains under SensorService control.
+ * Single-sample compatibility path: wake, stabilize, read once, then sleep.
  */
 mpu6050_motion_status_t MPU6050Motion_ReadSample(
     mpu6050_motion_sample_t *sample);
+
+/*
+ * Event-burst primitives. BeginBurst wakes/stabilizes once, ReadBurstSample
+ * performs one 14-byte accel/gyro/temp read without sleeping, and EndBurst
+ * returns the device to software sleep. Physical rail gating remains owned by
+ * the caller/SensorService.
+ *
+ * STAGING NOTE: introduced for Phase-5 event integration and not yet verified
+ * on hardware as of 2026-08-30.
+ */
+mpu6050_motion_status_t MPU6050Motion_BeginBurst(void);
+mpu6050_motion_status_t MPU6050Motion_ReadBurstSample(
+    mpu6050_motion_sample_t *sample);
+mpu6050_motion_status_t MPU6050Motion_EndBurst(void);
 
 /* Explicit software sleep before physical rail-off. */
 mpu6050_motion_status_t MPU6050Motion_Sleep(void);
 
 bool MPU6050Motion_IsReady(void);
+bool MPU6050Motion_IsBurstActive(void);
 
 #endif /* MPU6050_MOTION_H */
