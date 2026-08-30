@@ -1,129 +1,187 @@
-# Phase 5 — Event Data Pipeline and Telemetry V1
+# Phase 5 — Event Episode Data Pipeline and Telemetry V2
+
+## Status
+
+> **UNTESTED STAGING — 2026-08-30**
+>
+> The Event Episode, pulse-driven MPU6050 burst, 15-minute aggregation, and Telemetry V2 preparation paths were implemented while the hardware board was unavailable. They have not yet been clean-built, flashed, or validated on the board. No Phase-5 PASS claim is made for these paths.
 
 ## Scope
 
-This note freezes the current Phase-5 data contract before hardware orchestration is connected. It separates:
+The current pipeline separates four contracts:
 
-1. BMA Any-Motion trigger policy.
-2. Short high-detail event capture.
-3. Sparse temperature follow-up.
-4. Local event feature storage and 15-minute aggregation.
-5. Compact binary telemetry encoding.
+1. BMA456 Any-Motion pulse detection.
+2. Event Episode lifecycle and sparse temperature policy.
+3. Short per-pulse MPU6050 feature bursts.
+4. 15-minute aggregation and explicit compact telemetry encoding.
 
-The design intentionally sends information/features over LoRa rather than raw sensor waveforms in normal mode.
+Normal telemetry sends compact information/features, not raw sensor waveforms.
 
-## Event timeline
+## Pulse and Episode timeline
 
-An accepted BMA event starts a short motion-capture window.
+### Accepted first pulse
 
-- Motion capture target: approximately 2 s.
-- BMA samples are reduced online into compact features; raw XYZ is not retained in normal mode.
-- TMP117 is sampled at event time (`t0`).
-- Temperature follow-up target points are `t0`, `+5 s`, `+10 s`, `+20 s`.
-- The follow-up schedule is intentionally sparse so a delayed cooling response can be observed without keeping the MCU fully active for 20 s.
-- The exact drinking-response latency is not considered biologically fixed; field data will tune these offsets.
-- MPU6050 remains outside the V1 event path until the BMA/TMP path is proven. Later it can be enabled selectively for unusual rotational/high-energy events.
+- BMA pulse passes the Episode retrigger guard.
+- Start a new Episode.
+- Take TMP117 immediately.
+- Power on MPU6050 and acquire one short burst.
+- Arm TMP follow-up at +5/+15/+35/+65 s.
+- Set Episode close deadline to `pulse_time + 120 s`.
 
-## Event feature record
+### Accepted pulse #2+
 
-`App/Application/event_data.h` defines `bolus_event_feature_record_t`.
+- Keep the same Episode.
+- Record inter-pulse interval.
+- Take TMP117 immediately.
+- Acquire another short MPU burst.
+- Cancel all remaining timer-driven TMP follow-up for the Episode.
+- Reset close deadline to `pulse_time + 120 s`.
 
-Normal-mode motion features:
+### Rejected chatter pulse
 
-- event sequence and timestamp
-- capture duration and sample count
-- peak dynamic acceleration
-- RMS dynamic acceleration
-- dynamic-acceleration variance
-- peak jerk
-- RMS jerk
-- inter-event interval when available
-- sparse event-related temperature points
-- optional later rotation fields
-- processor/reference flags
+A BMA indication inside the 2 s Episode retrigger guard is suppressed. It does not trigger TMP or MPU acquisition and does not advance the accepted-pulse sequence.
 
-Dynamic acceleration is derived from the orientation-independent acceleration magnitude relative to 1 g. Jerk is derived from the resultant change in XYZ acceleration divided by the measured sample interval.
+### Episode close
 
-The event extractor (`EventFeatureExtractor`) updates sums/peaks online and therefore does not allocate a raw 2-s waveform buffer.
+An Episode closes after 120 s without an accepted motion pulse.
 
-## Physiological timing separation
+The 2 s guard and 120 s quiet timeout are engineering parameters, not validated physiological thresholds.
 
-Do not confuse three different timescales:
+## BMA Any-Motion policy
 
-- BMA Any-Motion `Duration`: 200–800 ms in the current bundled profiles; this is the trigger persistence requirement.
-- short detailed event capture: approximately 2 s; this supplies compact physical-motion features.
-- contraction morphology: approximately 8–10 s with roughly 40–60 s recurrence; this belongs to the longer BMA observation/pattern layer and must not be inferred solely from the 2-s capture duration.
+RuntimeConfig Version 10 keeps BMA Step Counter sensitivity independent from Any-Motion sensitivity.
 
-## BMA event profiles
+Bundled event profiles use zero long service-level cooldown so the Episode layer can observe pulse timing:
 
-RuntimeConfig version 8 resolves the first in-animal engineering sweep as:
-
-| Profile | Threshold | Duration | Cooldown |
+| Profile | Any-Motion threshold | Duration | Bundled cooldown |
 |---|---:|---:|---:|
-| VERY_LOW | 900 mg | 800 ms | 60 s |
-| LOW | 750 mg | 600 ms | 45 s |
-| LEVEL_1 | 600 mg | 500 ms | 30 s |
-| LEVEL_2 | 500 mg | 400 ms | 15 s |
-| LEVEL_3 | 400 mg | 300 ms | 5 s |
+| VERY_LOW | 900 mg | 800 ms | 0 s |
+| LOW | 750 mg | 600 ms | 0 s |
+| LEVEL_1 | 600 mg | 500 ms | 0 s |
+| LEVEL_2 | 500 mg | 400 ms | 0 s |
+| LEVEL_3 | 400 mg | 300 ms | 0 s |
 | LEVEL_4 | 300 mg | 200 ms | 0 s |
 | RAW | direct config | direct config | direct config |
-| OFF | event disabled | — | — |
+| OFF | disabled | — | — |
 
-LEVEL_2 is the current first in-animal development default. These values are calibration candidates, not validated cattle thresholds. Step Counter sensitivity remains independent.
+LEVEL_2 remains the development default. These are engineering calibration candidates, not cattle thresholds.
 
-## 15-minute telemetry snapshot
+## MPU6050 pulse burst
 
-`bolus_telemetry_summary_v1_t` is the internal frozen summary model. Before transmission the production scheduler will perform a final acquisition (TMP117, BMA summary, battery, fault state), update the current aggregation window, freeze the snapshot, then encode it.
+Version 10 default:
 
-The active collection window must be separated from the pending-TX snapshot so sensor collection can continue while a previous packet is retried.
+- event-trigger enabled
+- duration: 250 ms
+- sample rate: 100 Hz (~25 target samples)
+- accel range: ±4 g
+- gyro range: ±500 dps
 
-## Compact Summary V1 wire format
+For every accepted pulse:
 
-The V1 summary encoder produces exactly 24 bytes. Multibyte fields are little-endian.
+`rail ON -> configure -> wake/stabilize -> burst samples -> online reduction -> sleep -> rail OFF`
+
+Raw burst samples are discarded in normal mode. Compact features are retained:
+
+- peak/RMS dynamic acceleration
+- peak/RMS angular velocity
+- total angular motion
+- roll change / pitch change internally
+- orientation-change magnitude when valid
+
+The service explicitly powers the MPU rail OFF on success/failure cleanup paths.
+
+## Temperature policy
+
+TMP117 remains one-shot/shutdown between readings.
+
+Single-pulse Episode:
+
+`0 s, 5 s, 15 s, 35 s, 65 s`
+
+Multi-pulse Episode:
+
+- pulse #1 starts the sparse schedule
+- pulse #2 cancels remaining scheduled follow-up
+- pulse #2+ supplies immediate temperature observations at the natural motion-pulse times
+
+A separate sparse background TMP baseline remains configured at 600 s by default.
+
+## 15-minute window aggregation
+
+`TelemetryWindowService` collects across the active 15-minute window:
+
+- Episode count
+- accepted pulse count
+- retrigger-suppressed pulse count
+- maximum pulses observed in one Episode
+- inter-pulse interval mean/variance
+- temperature current/min/max/max-negative-excursion
+- successful MPU burst count
+- average MPU RMS acceleration and angular velocity
+- MPU peak acceleration and angular velocity
+- total angular motion
+- maximum orientation change
+- classifier placeholders / event flags
+
+At the 15-minute boundary the current staging path performs final TMP, final BMA sample, battery measurement, and fault/health capture, then freezes a summary and immediately rolls the active accumulator into the next window.
+
+## Telemetry V2 wire format
+
+Telemetry V2 is an explicit **32-byte** binary packet. Multibyte fields are little-endian.
 
 | Byte(s) | Field |
 |---|---|
-| 0 | protocol version nibble + message type nibble |
-| 1–2 | uplink sequence |
-| 3 | config version |
-| 4 | validity/health/status bitmap |
+| 0 | protocol version 2 + summary message type |
+| 1–2 | sequence |
+| 3 | RuntimeConfig version |
+| 4 | validity / health / `STAGING_UNTESTED` bitmap |
 | 5 | battery percent |
 | 6–7 | battery mV |
-| 8–9 | current temperature, centi-C |
-| 10–11 | minimum temperature, centi-C |
-| 12–13 | maximum temperature, centi-C |
-| 14–15 | maximum negative temperature excursion, centi-C signed |
-| 16 | motion-event count, saturated |
-| 17 | contraction-candidate count, saturated |
-| 18 | rotation-candidate count, saturated |
-| 19 | mean inter-event interval in seconds, saturated |
-| 20 | inter-event interval standard deviation in seconds, saturated |
-| 21 | RMS dynamic acceleration quantized in 20-mg units |
-| 22 | peak dynamic acceleration quantized in 20-mg units |
-| 23 | low 8 bits of combined event/reference flags |
+| 8–9 | current temperature, centi-°C |
+| 10–11 | minimum temperature, centi-°C |
+| 12–13 | maximum temperature, centi-°C |
+| 14–15 | maximum negative temperature excursion, signed centi-°C |
+| 16 | Episode count |
+| 17 | accepted pulse count |
+| 18 | guard-suppressed pulse count |
+| 19 | max pulses in one Episode |
+| 20 | mean inter-pulse interval, seconds |
+| 21 | inter-pulse interval standard deviation, seconds |
+| 22 | successful MPU burst count |
+| 23 | mean MPU dynamic RMS / 20 mg |
+| 24 | MPU peak dynamic acceleration / 20 mg |
+| 25 | mean MPU angular-velocity RMS / 10 dps |
+| 26 | MPU peak angular velocity / 10 dps |
+| 27 | max orientation change / 2 degrees |
+| 28 | total angular motion / 5 degrees |
+| 29 | contraction-candidate count — reserved until classifier connected |
+| 30 | rotation-candidate count — reserved until classifier connected |
+| 31 | low 8 bits of combined event/reference flags |
 
-The 24-byte format is a protocol contract, not a C struct layout. `TelemetryCodec_EncodeSummaryV1()` serializes every field explicitly.
-
-Detailed event records and raw diagnostic windows are separate future message types; they are not included in every normal uplink.
+Legacy 24-byte Telemetry V1 remains in the codec for compatibility, but the new Episode architecture prepares V2.
 
 ## Current implementation boundary
 
-Implemented now:
+### Prepared in code but not validated
 
-- RuntimeConfig v8 BMA event sweep.
-- application-level per-event data contract.
-- online short-window BMA feature extractor.
-- application-level 15-minute telemetry snapshot model.
-- explicit fixed 24-byte Summary V1 encoder.
+- RuntimeConfig V10
+- Event Episode grouping
+- pulse-driven/scheduled TMP policy
+- short power-gated MPU burst per accepted pulse
+- online MPU feature extraction
+- Episode MPU aggregation
+- 15-minute telemetry window aggregation
+- final scheduled measurement snapshot
+- explicit 32-byte Telemetry V2 encoding
+- `telemetry_payload_v2_ready` staging flag for debugger inspection
 
-Still to wire/bench-prove:
+### Deliberately not connected yet
 
-- accepted BMA INT1 -> start event capture.
-- t0 TMP117 acquisition.
-- non-blocking 2-s BMA sample scheduling.
-- sparse +5/+10/+20 s temperature follow-up scheduler.
-- event ring/aggregator integration with the new BMA features.
-- final scheduled acquisition and snapshot freeze.
-- RadioService/LoRaWAN transmission of the encoded payload.
+- actual LoRa/LoRaWAN TX of V2
+- pending-TX/retry queue and durable frozen packet ownership
+- STOP2 + RTC/LPTIM scheduler migration
+- classifier-generated contraction/rotation candidate counts
+- full board/build/hardware validation
+- measured power characterization
 
-Do not mark these unwired items PASS until code, build and hardware evidence exist.
+The current implementation stops at **telemetry preparation**, as intended for this staging pass.
