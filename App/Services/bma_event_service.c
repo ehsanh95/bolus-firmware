@@ -11,6 +11,7 @@ static bool s_has_accepted_event = false;
 
 bolus_bma_event_sensitivity_t bma_event_service_diag_profile =
     BOLUS_BMA_EVENT_SENSITIVITY_RAW;
+bool bma_event_service_diag_interrupt_enabled = false;
 uint16_t bma_event_service_diag_threshold_mg = 0U;
 uint16_t bma_event_service_diag_duration_ms = 0U;
 uint16_t bma_event_service_diag_cooldown_s = 0U;
@@ -37,6 +38,7 @@ bma_event_service_status_t BmaEventService_Init(
 
     bma_event_service_diag_profile =
         BOLUS_BMA_EVENT_SENSITIVITY_RAW;
+    bma_event_service_diag_interrupt_enabled = false;
     bma_event_service_diag_threshold_mg = 0U;
     bma_event_service_diag_duration_ms = 0U;
     bma_event_service_diag_cooldown_s = 0U;
@@ -52,6 +54,7 @@ bma_event_service_status_t BmaEventService_Init(
     if ((!config->event_processing.enable) ||
         (!config->bma.motion_interrupt_enable))
     {
+        BmaIrqDiag_Disable();
         return BMA_EVENT_SERVICE_DISABLED;
     }
 
@@ -61,7 +64,7 @@ bma_event_service_status_t BmaEventService_Init(
         return BMA_EVENT_SERVICE_ERROR_CONFIG;
     }
 
-    event_config.enable = true;
+    event_config.enable = event_settings.interrupt_enable;
     event_config.threshold_mg = event_settings.threshold_mg;
     event_config.duration_ms = event_settings.duration_ms;
 
@@ -75,22 +78,29 @@ bma_event_service_status_t BmaEventService_Init(
     (void)FaultManager_ClearFault(BOLUS_FAULT_BMA456_COMM);
     (void)FaultManager_ClearFault(BOLUS_FAULT_CONFIG_INVALID);
 
-    s_event_cooldown_ms = (uint32_t)event_settings.cooldown_s * 1000UL;
-
     bma_event_service_diag_profile =
         config->event_processing.bma_event_sensitivity_level;
+    bma_event_service_diag_interrupt_enabled = event_settings.interrupt_enable;
     bma_event_service_diag_threshold_mg = event_settings.threshold_mg;
     bma_event_service_diag_duration_ms = event_settings.duration_ms;
     bma_event_service_diag_cooldown_s = event_settings.cooldown_s;
 
+    if (!event_settings.interrupt_enable)
+    {
+        /*
+         * OFF means no Any-Motion wake/event path. BMA itself remains owned by
+         * SensorService so scheduled acquisition can still read it later.
+         */
+        BmaIrqDiag_Disable();
+        return BMA_EVENT_SERVICE_DISABLED;
+    }
+
+    s_event_cooldown_ms = (uint32_t)event_settings.cooldown_s * 1000UL;
     s_event_service_ready = BMA456Event_IsReady();
 
     /*
-     * Staged bring-up STEP 2:
-     * once the sensor-side Any-Motion configuration is known-good, enable an
-     * isolated PC7/EXTI7 harness whose ISR only clears the pending edge and
-     * increments a counter. No BMA status read, TMP/MPU acquisition, or event
-     * processing is allowed from the interrupt path in this step.
+     * Isolated PC7/EXTI7 harness: ISR only clears/counts the edge. No BMA
+     * status read, TMP/MPU acquisition, or event processing occurs in ISR.
      */
     if (s_event_service_ready)
     {
@@ -146,10 +156,6 @@ bma_event_service_status_t BmaEventService_Read(
      * Cooldown is deliberately applied after reading/acknowledging the Bosch
      * feature status. Therefore INT1 remains correctly re-armed even when an
      * event is suppressed. The ISR remains counter-only.
-     *
-     * HAL_GetTick is used here only as the existing Phase-5 millisecond
-     * timebase. A later Platform timebase abstraction can replace it without
-     * changing the event policy contract.
      */
     now_ms = HAL_GetTick();
 
