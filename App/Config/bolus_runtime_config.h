@@ -15,7 +15,7 @@
  * Sensor/Radio service APIs.
  */
 
-#define BOLUS_RUNTIME_CONFIG_VERSION  5U
+#define BOLUS_RUNTIME_CONFIG_VERSION  6U
 
 typedef enum
 {
@@ -30,6 +30,26 @@ typedef enum
     BOLUS_BMA_ODR_25_HZ,
     BOLUS_BMA_ODR_50_HZ
 } bolus_bma_odr_t;
+
+/*
+ * Independent BMA456 Any-Motion sensitivity profiles.
+ *
+ * These are engineering/bench sweep profiles, NOT validated cattle
+ * thresholds. Level 1 is the most robust/least sensitive bundled profile;
+ * Level 4 is closest to the approximately 100 mg / 100 ms Phase-5 bench
+ * readback. RAW keeps direct threshold/duration/cooldown control available for
+ * field calibration and future downlink updates.
+ *
+ * This type is intentionally separate from bolus_bma_step_sensitivity_t.
+ */
+typedef enum
+{
+    BOLUS_BMA_EVENT_SENSITIVITY_RAW = 0,
+    BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_1,
+    BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_2,
+    BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_3,
+    BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_4
+} bolus_bma_event_sensitivity_t;
 
 typedef enum
 {
@@ -77,18 +97,25 @@ typedef struct
     bool event_trigger_enable;
 } bolus_mpu_config_t;
 
+/* Effective BMA Any-Motion settings after resolving RAW/profile mode. */
+typedef struct
+{
+    uint16_t threshold_mg;
+    uint16_t duration_ms;
+    uint16_t cooldown_s;
+} bolus_bma_event_settings_t;
+
 /*
  * Multi-timescale event-processing policy.
  *
  * IMPORTANT:
  * - BMA event detection is independent from the native Step Counter settings.
- * - bma_event_threshold_mg and bma_event_duration_ms are the actual hardware
- *   Any-Motion controls that a future downlink can tune. A value of 0 means
- *   "keep the Bosch feature-image value". This is the safest development
- *   default because the cattle literature does not provide a portable BMA456
- *   interrupt-amplitude threshold.
- * - bma_event_sensitivity_level remains a product/UI profile identifier for
- *   later field-calibrated mappings. Level 0 means raw/default mode.
+ * - In RAW mode, bma_event_threshold_mg, bma_event_duration_ms and
+ *   bma_event_cooldown_s are used directly. A zero threshold or duration means
+ *   "keep the Bosch feature-image value"; zero cooldown disables suppression.
+ * - In LEVEL_1..LEVEL_4 mode, the three raw fields must remain zero and a
+ *   bundled engineering/bench profile is resolved centrally. This avoids
+ *   ambiguous partial overrides. Field-calibrated values can always use RAW.
  * - Published numerical values below are reference benchmarks, not universal
  *   cattle thresholds. V1 event outputs must preserve rule_source so the
  *   backend can distinguish literature-reference matches from field-calibrated
@@ -99,7 +126,7 @@ typedef struct
     bool enable;
     bolus_event_rule_source_t rule_source;
 
-    uint8_t bma_event_sensitivity_level;
+    bolus_bma_event_sensitivity_t bma_event_sensitivity_level;
     uint16_t bma_event_threshold_mg;
     uint16_t bma_event_duration_ms;
     uint16_t bma_event_cooldown_s;
@@ -155,5 +182,14 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config);
 
 /* Validate a candidate config before applying it (including future downlink). */
 bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config);
+
+/*
+ * Resolve the active BMA Any-Motion hardware/cooldown settings. The returned
+ * values are bench/engineering settings until rule_source becomes explicitly
+ * field-calibrated from synchronized animal data.
+ */
+bool BolusRuntimeConfig_ResolveBmaEventSettings(
+    const bolus_runtime_config_t *config,
+    bolus_bma_event_settings_t *settings);
 
 #endif /* BOLUS_RUNTIME_CONFIG_H */

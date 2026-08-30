@@ -95,9 +95,12 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
      * calibration replaces values without rewriting the classifier.
      *
      * BMA Any-Motion:
-     * - threshold/duration 0 means preserve the Bosch feature-image settings.
-     *   We read those settings back during the bench instead of inventing a
-     *   cattle-specific interrupt threshold before field calibration.
+     * - LEVEL_2 is a deliberately more robust engineering/bench starting point
+     *   than the approximately 100 mg / 100 ms feature-image readback that was
+     *   observed to trigger on very small bench motion. It is NOT a cattle
+     *   threshold and must be field-calibrated.
+     * - RAW mode remains available for direct threshold/duration/cooldown
+     *   control after synchronized field data exists.
      * Drinking:
      * - published fall methods use 0.5 C / 5 min and 0.5 C / 10 min scales.
      * - 38.1 C is retained as a weaker published absolute-temperature rule.
@@ -113,8 +116,9 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->event_processing.rule_source =
         BOLUS_EVENT_RULES_REFERENCE_BENCHMARK;
 
-    /* Separate from Step Counter sensitivity. */
-    config->event_processing.bma_event_sensitivity_level = 0U;
+    /* Completely independent from Step Counter sensitivity. */
+    config->event_processing.bma_event_sensitivity_level =
+        BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_2;
     config->event_processing.bma_event_threshold_mg = 0U;
     config->event_processing.bma_event_duration_ms = 0U;
     config->event_processing.bma_event_cooldown_s = 0U;
@@ -233,14 +237,30 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         return false;
     }
 
-    if (config->event_processing.bma_event_sensitivity_level > 7U)
+    if (config->event_processing.bma_event_sensitivity_level >
+        BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_4)
     {
         return false;
     }
 
     /*
-     * 0 keeps the Bosch feature-image setting. Otherwise Any-Motion threshold
-     * is expressed in mg and must remain in the Bosch 0..1 g domain.
+     * Profile mode and direct RAW controls are intentionally mutually
+     * exclusive. This keeps future downlink semantics deterministic and avoids
+     * hidden partial overrides.
+     */
+    if ((config->event_processing.bma_event_sensitivity_level !=
+         BOLUS_BMA_EVENT_SENSITIVITY_RAW) &&
+        ((config->event_processing.bma_event_threshold_mg != 0U) ||
+         (config->event_processing.bma_event_duration_ms != 0U) ||
+         (config->event_processing.bma_event_cooldown_s != 0U)))
+    {
+        return false;
+    }
+
+    /*
+     * In RAW mode, 0 keeps the Bosch feature-image setting. Otherwise the
+     * Any-Motion threshold is expressed in mg and remains in the Bosch 0..1 g
+     * domain.
      */
     if (config->event_processing.bma_event_threshold_mg > 1000U)
     {
@@ -329,6 +349,62 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         (config->radio.coding_rate > 4U))
     {
         return false;
+    }
+
+    return true;
+}
+
+bool BolusRuntimeConfig_ResolveBmaEventSettings(
+    const bolus_runtime_config_t *config,
+    bolus_bma_event_settings_t *settings)
+{
+    if ((config == NULL) || (settings == NULL) ||
+        (!BolusRuntimeConfig_Validate(config)))
+    {
+        return false;
+    }
+
+    switch (config->event_processing.bma_event_sensitivity_level)
+    {
+        case BOLUS_BMA_EVENT_SENSITIVITY_RAW:
+            settings->threshold_mg =
+                config->event_processing.bma_event_threshold_mg;
+            settings->duration_ms =
+                config->event_processing.bma_event_duration_ms;
+            settings->cooldown_s =
+                config->event_processing.bma_event_cooldown_s;
+            break;
+
+        case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_1:
+            /* Robust bench candidate; not a biologically validated threshold. */
+            settings->threshold_mg = 300U;
+            settings->duration_ms = 300U;
+            settings->cooldown_s = 30U;
+            break;
+
+        case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_2:
+            /* Moderate bench candidate used as the current development default. */
+            settings->threshold_mg = 200U;
+            settings->duration_ms = 200U;
+            settings->cooldown_s = 15U;
+            break;
+
+        case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_3:
+            /* Sensitive bench candidate; still above the prior bench setting. */
+            settings->threshold_mg = 150U;
+            settings->duration_ms = 140U;
+            settings->cooldown_s = 5U;
+            break;
+
+        case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_4:
+            /* Approximate Phase-5 bench reference for controlled comparison. */
+            settings->threshold_mg = 100U;
+            settings->duration_ms = 100U;
+            settings->cooldown_s = 0U;
+            break;
+
+        default:
+            return false;
     }
 
     return true;
