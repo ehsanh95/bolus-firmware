@@ -22,7 +22,7 @@
  *
  * Roll/pitch/tilt are derived from the gravity vector, so they are meaningful
  * when the bolus is stationary or moving slowly enough that linear acceleration
- * is small compared with 1 g.  Absolute yaw/compass heading is intentionally
+ * is small compared with 1 g. Absolute yaw/compass heading is intentionally
  * marked unavailable: MPU6050 has no magnetometer, so gravity alone cannot
  * observe rotation about the vertical axis.
  */
@@ -34,6 +34,7 @@ bool mpu6050_diag_absolute_yaw_available = false;
 
 static I2C_HandleTypeDef *s_hi2c = NULL;
 static bool s_ready = false;
+static bool s_burst_active = false;
 static uint16_t s_accel_lsb_per_g = 8192U;
 static uint16_t s_gyro_lsb_per_dps_x10 = 655U;
 
@@ -74,16 +75,6 @@ static void UpdateOrientationDiagnostics(
         return;
     }
 
-    /*
-     * Board-frame convention:
-     *   roll  : rotation about +X
-     *   pitch : rotation about +Y
-     *   tilt  : angle between +Z and the gravity/acceleration vector
-     *
-     * These signs are intentionally bench-validated before they become a
-     * telemetry contract because final enclosure PCB orientation may require
-     * an axis remap.
-     */
     roll_deg = atan2(ay, az) * MPU6050_MOTION_RAD_TO_DEG;
     pitch_deg = atan2(-ax, sqrt((ay * ay) + (az * az))) *
                 MPU6050_MOTION_RAD_TO_DEG;
@@ -207,7 +198,6 @@ static bool MapSampleRate(uint16_t sample_rate_hz, uint8_t *divider)
         return false;
     }
 
-    /* DLPF enabled => internal gyro output rate is 1 kHz. */
     if ((sample_rate_hz == 0U) ||
         (sample_rate_hz > 1000U) ||
         ((1000U % sample_rate_hz) != 0U))
@@ -224,6 +214,72 @@ static bool MapSampleRate(uint16_t sample_rate_hz, uint8_t *divider)
 
     *divider = (uint8_t)divider_value;
     return true;
+}
+
+static mpu6050_motion_status_t ReadCurrentSample(
+    mpu6050_motion_sample_t *sample)
+{
+    uint8_t data[14] = {0};
+    int16_t accel_x_raw;
+    int16_t accel_y_raw;
+    int16_t accel_z_raw;
+    int16_t temp_raw;
+    int16_t gyro_x_raw;
+    int16_t gyro_y_raw;
+    int16_t gyro_z_raw;
+    HAL_StatusTypeDef hal_status;
+
+    if (sample == NULL)
+    {
+        return MPU6050_MOTION_ERROR_PARAM;
+    }
+
+    hal_status = HAL_I2C_Mem_Read(
+        s_hi2c,
+        MPU6050_I2C_ADDRESS,
+        MPU6050_MOTION_ACCEL_XOUT_H_REG,
+        I2C_MEMADD_SIZE_8BIT,
+        data,
+        sizeof(data),
+        MPU6050_I2C_TIMEOUT_MS);
+
+    if (hal_status != HAL_OK)
+    {
+        mpu6050_diag_orientation_valid = false;
+        return MPU6050_MOTION_ERROR_COMM;
+    }
+
+    accel_x_raw = (int16_t)(((uint16_t)data[0] << 8) | data[1]);
+    accel_y_raw = (int16_t)(((uint16_t)data[2] << 8) | data[3]);
+    accel_z_raw = (int16_t)(((uint16_t)data[4] << 8) | data[5]);
+    temp_raw = (int16_t)(((uint16_t)data[6] << 8) | data[7]);
+    gyro_x_raw = (int16_t)(((uint16_t)data[8] << 8) | data[9]);
+    gyro_y_raw = (int16_t)(((uint16_t)data[10] << 8) | data[11]);
+    gyro_z_raw = (int16_t)(((uint16_t)data[12] << 8) | data[13]);
+
+    sample->accel_x_mg =
+        (int16_t)(((int32_t)accel_x_raw * 1000L) / s_accel_lsb_per_g);
+    sample->accel_y_mg =
+        (int16_t)(((int32_t)accel_y_raw * 1000L) / s_accel_lsb_per_g);
+    sample->accel_z_mg =
+        (int16_t)(((int32_t)accel_z_raw * 1000L) / s_accel_lsb_per_g);
+
+    sample->gyro_x_mdps =
+        ((int32_t)gyro_x_raw * 10000L) / s_gyro_lsb_per_dps_x10;
+    sample->gyro_y_mdps =
+        ((int32_t)gyro_y_raw * 10000L) / s_gyro_lsb_per_dps_x10;
+    sample->gyro_z_mdps =
+        ((int32_t)gyro_z_raw * 10000L) / s_gyro_lsb_per_dps_x10;
+
+    sample->temperature_mdeg_c =
+        (((int32_t)temp_raw * 1000L) / 340L) + 36530L;
+
+    UpdateOrientationDiagnostics(
+        sample->accel_x_mg,
+        sample->accel_y_mg,
+        sample->accel_z_mg);
+
+    return MPU6050_MOTION_OK;
 }
 
 mpu6050_motion_status_t MPU6050Motion_Sleep(void)
@@ -247,6 +303,7 @@ mpu6050_motion_status_t MPU6050Motion_Sleep(void)
         return MPU6050_MOTION_ERROR_COMM;
     }
 
+    s_burst_active = false;
     return MPU6050_MOTION_OK;
 }
 
@@ -281,6 +338,7 @@ mpu6050_motion_status_t MPU6050Motion_Init(
 
     s_hi2c = hi2c;
     s_ready = false;
+    s_burst_active = false;
 
     if (!ReadReg(MPU6050_MOTION_WHO_AM_I_REG, &who_am_i))
     {
@@ -292,7 +350,6 @@ mpu6050_motion_status_t MPU6050Motion_Init(
         return MPU6050_MOTION_ERROR_CONFIG;
     }
 
-    /* Wake using the internal oscillator for the initial bounded bench path. */
     if (!WriteReg(MPU6050_MOTION_PWR_MGMT_1_REG, 0x00U))
     {
         return MPU6050_MOTION_ERROR_COMM;
@@ -335,28 +392,18 @@ mpu6050_motion_status_t MPU6050Motion_Init(
     return MPU6050_MOTION_OK;
 }
 
-mpu6050_motion_status_t MPU6050Motion_ReadSample(
-    mpu6050_motion_sample_t *sample)
+mpu6050_motion_status_t MPU6050Motion_BeginBurst(void)
 {
     uint8_t pwr1 = 0U;
-    uint8_t data[14] = {0};
-    int16_t accel_x_raw;
-    int16_t accel_y_raw;
-    int16_t accel_z_raw;
-    int16_t temp_raw;
-    int16_t gyro_x_raw;
-    int16_t gyro_y_raw;
-    int16_t gyro_z_raw;
-    HAL_StatusTypeDef hal_status;
-
-    if (sample == NULL)
-    {
-        return MPU6050_MOTION_ERROR_PARAM;
-    }
 
     if ((s_hi2c == NULL) || (!s_ready))
     {
         return MPU6050_MOTION_ERROR_NOT_READY;
+    }
+
+    if (s_burst_active)
+    {
+        return MPU6050_MOTION_OK;
     }
 
     if (!ReadReg(MPU6050_MOTION_PWR_MGMT_1_REG, &pwr1))
@@ -372,59 +419,65 @@ mpu6050_motion_status_t MPU6050Motion_ReadSample(
     }
 
     HAL_Delay(MPU6050_MOTION_GYRO_SETTLE_MS);
+    s_burst_active = true;
+    return MPU6050_MOTION_OK;
+}
 
-    hal_status = HAL_I2C_Mem_Read(
-        s_hi2c,
-        MPU6050_I2C_ADDRESS,
-        MPU6050_MOTION_ACCEL_XOUT_H_REG,
-        I2C_MEMADD_SIZE_8BIT,
-        data,
-        sizeof(data),
-        MPU6050_I2C_TIMEOUT_MS);
-
-    /* Always attempt software sleep after the acquisition window. */
-    (void)MPU6050Motion_Sleep();
-
-    if (hal_status != HAL_OK)
+mpu6050_motion_status_t MPU6050Motion_ReadBurstSample(
+    mpu6050_motion_sample_t *sample)
+{
+    if (!s_burst_active)
     {
-        mpu6050_diag_orientation_valid = false;
-        return MPU6050_MOTION_ERROR_COMM;
+        return MPU6050_MOTION_ERROR_NOT_READY;
     }
 
-    accel_x_raw = (int16_t)(((uint16_t)data[0] << 8) | data[1]);
-    accel_y_raw = (int16_t)(((uint16_t)data[2] << 8) | data[3]);
-    accel_z_raw = (int16_t)(((uint16_t)data[4] << 8) | data[5]);
-    temp_raw = (int16_t)(((uint16_t)data[6] << 8) | data[7]);
-    gyro_x_raw = (int16_t)(((uint16_t)data[8] << 8) | data[9]);
-    gyro_y_raw = (int16_t)(((uint16_t)data[10] << 8) | data[11]);
-    gyro_z_raw = (int16_t)(((uint16_t)data[12] << 8) | data[13]);
+    return ReadCurrentSample(sample);
+}
 
-    sample->accel_x_mg =
-        (int16_t)(((int32_t)accel_x_raw * 1000L) / s_accel_lsb_per_g);
-    sample->accel_y_mg =
-        (int16_t)(((int32_t)accel_y_raw * 1000L) / s_accel_lsb_per_g);
-    sample->accel_z_mg =
-        (int16_t)(((int32_t)accel_z_raw * 1000L) / s_accel_lsb_per_g);
+mpu6050_motion_status_t MPU6050Motion_EndBurst(void)
+{
+    if ((s_hi2c == NULL) || (!s_ready))
+    {
+        return MPU6050_MOTION_ERROR_NOT_READY;
+    }
 
-    sample->gyro_x_mdps =
-        ((int32_t)gyro_x_raw * 10000L) / s_gyro_lsb_per_dps_x10;
-    sample->gyro_y_mdps =
-        ((int32_t)gyro_y_raw * 10000L) / s_gyro_lsb_per_dps_x10;
-    sample->gyro_z_mdps =
-        ((int32_t)gyro_z_raw * 10000L) / s_gyro_lsb_per_dps_x10;
+    return MPU6050Motion_Sleep();
+}
 
-    sample->temperature_mdeg_c =
-        (((int32_t)temp_raw * 1000L) / 340L) + 36530L;
+mpu6050_motion_status_t MPU6050Motion_ReadSample(
+    mpu6050_motion_sample_t *sample)
+{
+    mpu6050_motion_status_t status;
+    mpu6050_motion_status_t end_status;
 
-    UpdateOrientationDiagnostics(
-        sample->accel_x_mg,
-        sample->accel_y_mg,
-        sample->accel_z_mg);
+    if (sample == NULL)
+    {
+        return MPU6050_MOTION_ERROR_PARAM;
+    }
 
-    return MPU6050_MOTION_OK;
+    status = MPU6050Motion_BeginBurst();
+    if (status != MPU6050_MOTION_OK)
+    {
+        return status;
+    }
+
+    status = MPU6050Motion_ReadBurstSample(sample);
+    end_status = MPU6050Motion_EndBurst();
+
+    if (status != MPU6050_MOTION_OK)
+    {
+        return status;
+    }
+
+    return end_status;
 }
 
 bool MPU6050Motion_IsReady(void)
 {
     return s_ready;
+}
+
+bool MPU6050Motion_IsBurstActive(void)
+{
+    return s_ready && s_burst_active;
 }
