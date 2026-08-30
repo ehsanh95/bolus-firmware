@@ -28,6 +28,8 @@
 #include "sensor_service.h"
 #include "bma_event_service.h"
 #include "event_episode_service.h"
+#include "telemetry_window_service.h"
+#include "telemetry_codec.h"
 #include "bma_irq_diag.h"
 #include "bolus_runtime_config.h"
 #include "rfm95w_board.h"
@@ -144,6 +146,20 @@ uint32_t event_episode_mpu_burst_failure_count = 0U;
 uint16_t event_episode_last_mpu_sample_count = 0U;
 uint16_t event_episode_last_mpu_peak_gyro_dps = 0U;
 uint16_t event_episode_last_mpu_orientation_change_cdeg = 0U;
+
+/* 15-minute telemetry staging. No RF transmission is connected yet. */
+telemetry_window_service_t telemetry_window_service = {0};
+telemetry_window_status_t telemetry_window_status = TELEMETRY_WINDOW_ERROR_CONFIG;
+bolus_telemetry_summary_v2_t telemetry_frozen_summary_v2 = {0};
+telemetry_codec_status_t telemetry_codec_status = TELEMETRY_CODEC_ERROR_PARAM;
+uint8_t telemetry_payload_v2[BOLUS_TELEMETRY_SUMMARY_V2_SIZE] = {0};
+size_t telemetry_payload_v2_size = 0U;
+bool telemetry_window_ready = false;
+bool telemetry_payload_v2_ready = false;
+uint32_t telemetry_snapshot_count = 0U;
+uint32_t telemetry_snapshot_failure_count = 0U;
+uint16_t telemetry_last_battery_mv = 0U;
+uint8_t telemetry_last_battery_percent = 0U;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -191,6 +207,11 @@ static void HandleEventEpisodeAction(const event_episode_action_t *action)
     if (action == NULL)
     {
         return;
+    }
+
+    if (telemetry_window_ready)
+    {
+        TelemetryWindow_RecordEpisodeAction(&telemetry_window_service, action);
     }
 
     if (action->pulse_accepted)
@@ -258,6 +279,13 @@ static void HandleEventEpisodeAction(const event_episode_action_t *action)
                         &event_episode_service,
                         action->temperature_source,
                         tmp_service_sample.temperature_mdeg_c);
+
+                if (telemetry_window_ready)
+                {
+                    TelemetryWindow_RecordTemperature(
+                        &telemetry_window_service,
+                        tmp_service_sample.temperature_mdeg_c);
+                }
             }
         }
     }
@@ -271,7 +299,6 @@ static void HandleEventEpisodeAction(const event_episode_action_t *action)
         }
         else
         {
-            /* Keep watchdog margin around the bounded 100..500 ms burst. */
             HAL_IWDG_Refresh(&hiwdg);
 
             mpu_service_read_status =
@@ -317,6 +344,13 @@ static void HandleEventEpisodeAction(const event_episode_action_t *action)
                         mpu_service_burst_features.peak_angular_velocity_dps;
                     event_episode_last_mpu_orientation_change_cdeg =
                         mpu_service_burst_features.orientation_change_cdeg;
+
+                    if (telemetry_window_ready)
+                    {
+                        TelemetryWindow_RecordMpuBurst(
+                            &telemetry_window_service,
+                            &mpu_service_burst_features);
+                    }
                 }
                 else
                 {
@@ -395,6 +429,13 @@ int main(void)
       EventEpisodeService_Init(&event_episode_service, &sensor_service_config);
   event_episode_ready = (event_episode_service_status == EVENT_EPISODE_OK);
 
+  telemetry_window_status =
+      TelemetryWindow_Init(
+          &telemetry_window_service,
+          &sensor_service_config,
+          HAL_GetTick());
+  telemetry_window_ready = (telemetry_window_status == TELEMETRY_WINDOW_OK);
+
   /* BMA456: continuous low-power sentinel. */
   bma456_service_init_status = SensorService_InitBma(&hspi2, &sensor_service_config);
   bma456_service_ready =
@@ -419,6 +460,13 @@ int main(void)
   {
       tmp_service_read_status = SensorService_ReadTemperatureOneShot(&tmp_service_sample);
       tmp_service_last_read_tick = HAL_GetTick();
+
+      if ((tmp_service_read_status == SENSOR_SERVICE_OK) && telemetry_window_ready)
+      {
+          TelemetryWindow_RecordTemperature(
+              &telemetry_window_service,
+              tmp_service_sample.temperature_mdeg_c);
+      }
   }
 
   /*
@@ -568,6 +616,104 @@ int main(void)
     {
         tmp_service_last_read_tick = HAL_GetTick();
         tmp_service_read_status = SensorService_ReadTemperatureOneShot(&tmp_service_sample);
+
+        if ((tmp_service_read_status == SENSOR_SERVICE_OK) && telemetry_window_ready)
+        {
+            TelemetryWindow_RecordTemperature(
+                &telemetry_window_service,
+                tmp_service_sample.temperature_mdeg_c);
+        }
+    }
+
+    /*
+     * PREPARE ONLY: at each 15-minute boundary perform the final acquisitions,
+     * freeze the window and encode a 32-byte V2 packet. No SX1276 TX is called
+     * yet. The frozen summary/payload are visible in Live Expressions and may be
+     * overwritten by the next window until the radio pending/retry queue is added.
+     */
+    if (telemetry_window_ready &&
+        TelemetryWindow_IsDue(&telemetry_window_service, HAL_GetTick()))
+    {
+        battery_status_t battery_mv_status;
+        battery_status_t battery_percent_status;
+        bolus_health_status_t health;
+        bool fault_present;
+
+        telemetry_payload_v2_ready = false;
+
+        if (tmp_service_ready)
+        {
+            tmp_service_read_status =
+                SensorService_ReadTemperatureOneShot(&tmp_service_sample);
+            tmp_service_last_read_tick = HAL_GetTick();
+
+            if (tmp_service_read_status == SENSOR_SERVICE_OK)
+            {
+                TelemetryWindow_RecordTemperature(
+                    &telemetry_window_service,
+                    tmp_service_sample.temperature_mdeg_c);
+            }
+        }
+
+        if (bma456_service_ready)
+        {
+            bma456_service_read_status =
+                SensorService_ReadBmaSample(&bma456_service_sample);
+            bma456_service_last_read_tick = HAL_GetTick();
+        }
+
+        battery_mv_status = Battery_ReadMillivolts(&telemetry_last_battery_mv);
+        battery_percent_status =
+            Battery_ReadPercent(&telemetry_last_battery_percent);
+
+        if ((battery_mv_status != BATTERY_OK) ||
+            (battery_percent_status != BATTERY_OK))
+        {
+            FaultManager_Raise(BOLUS_FAULT_BATTERY_MEASUREMENT);
+        }
+        else
+        {
+            (void)FaultManager_ClearFault(BOLUS_FAULT_BATTERY_MEASUREMENT);
+        }
+
+        health = FaultManager_GetHealth();
+        fault_present = (FaultManager_GetActiveMask() != 0U);
+
+        telemetry_window_status =
+            TelemetryWindow_FreezeSummaryV2(
+                &telemetry_window_service,
+                &sensor_service_config,
+                HAL_GetTick(),
+                telemetry_last_battery_mv,
+                telemetry_last_battery_percent,
+                fault_present,
+                (health == BOLUS_HEALTH_DEGRADED),
+                (health == BOLUS_HEALTH_CRITICAL),
+                &telemetry_frozen_summary_v2);
+
+        if (telemetry_window_status == TELEMETRY_WINDOW_OK)
+        {
+            telemetry_codec_status =
+                TelemetryCodec_EncodeSummaryV2(
+                    &telemetry_frozen_summary_v2,
+                    telemetry_payload_v2,
+                    sizeof(telemetry_payload_v2),
+                    &telemetry_payload_v2_size);
+
+            if (telemetry_codec_status == TELEMETRY_CODEC_OK)
+            {
+                telemetry_payload_v2_ready = true;
+                telemetry_snapshot_count++;
+            }
+            else
+            {
+                telemetry_snapshot_failure_count++;
+            }
+        }
+        else
+        {
+            telemetry_snapshot_failure_count++;
+        }
     }
 
     /* MPU is otherwise physically OFF; only accepted pulses request a burst. */
