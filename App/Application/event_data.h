@@ -14,28 +14,37 @@
 
 #define BOLUS_EVENT_MOTION_CAPTURE_TARGET_MS      2000U
 
-#define BOLUS_EVENT_TEMP_POINT_COUNT              4U
+/*
+ * First-pulse thermal trajectory points. If pulse #2 arrives in the same Event
+ * Episode, the remaining scheduled points are cancelled and later pulse
+ * records use their immediate T0 temperature instead.
+ */
+#define BOLUS_EVENT_TEMP_POINT_COUNT              5U
 #define BOLUS_EVENT_TEMP_T0_OFFSET_MS             0U
 #define BOLUS_EVENT_TEMP_T5_OFFSET_MS             5000U
-#define BOLUS_EVENT_TEMP_T10_OFFSET_MS            10000U
-#define BOLUS_EVENT_TEMP_T20_OFFSET_MS            20000U
+#define BOLUS_EVENT_TEMP_T15_OFFSET_MS            15000U
+#define BOLUS_EVENT_TEMP_T35_OFFSET_MS            35000U
+#define BOLUS_EVENT_TEMP_T65_OFFSET_MS            65000U
 
 typedef enum
 {
     BOLUS_EVENT_TEMP_T0 = 0,
     BOLUS_EVENT_TEMP_T5,
-    BOLUS_EVENT_TEMP_T10,
-    BOLUS_EVENT_TEMP_T20
+    BOLUS_EVENT_TEMP_T15,
+    BOLUS_EVENT_TEMP_T35,
+    BOLUS_EVENT_TEMP_T65
 } bolus_event_temperature_point_t;
 
 #define BOLUS_EVENT_TEMP_VALID_T0   (1U << BOLUS_EVENT_TEMP_T0)
 #define BOLUS_EVENT_TEMP_VALID_T5   (1U << BOLUS_EVENT_TEMP_T5)
-#define BOLUS_EVENT_TEMP_VALID_T10  (1U << BOLUS_EVENT_TEMP_T10)
-#define BOLUS_EVENT_TEMP_VALID_T20  (1U << BOLUS_EVENT_TEMP_T20)
+#define BOLUS_EVENT_TEMP_VALID_T15  (1U << BOLUS_EVENT_TEMP_T15)
+#define BOLUS_EVENT_TEMP_VALID_T35  (1U << BOLUS_EVENT_TEMP_T35)
+#define BOLUS_EVENT_TEMP_VALID_T65  (1U << BOLUS_EVENT_TEMP_T65)
 
 /*
- * Compact per-event feature record retained locally before the 15-minute
- * telemetry aggregation step.
+ * Compact per-motion-pulse feature record retained locally before the
+ * 15-minute telemetry aggregation step. Several pulse records may belong to
+ * one higher-level Event Episode.
  *
  * Motion features are orientation-independent or relative features. Raw XYZ
  * samples are intentionally not retained in normal mode.
