@@ -57,7 +57,32 @@ typedef struct
     uint16_t gyro_range_dps;
 } sensor_service_mpu_sample_t;
 
-/* BMA456 low-power continuous motion path. */
+/*
+ * Compact features from one power-gated MPU6050 burst. Raw burst samples are
+ * deliberately discarded after online accumulation in normal operation.
+ */
+typedef struct
+{
+    uint16_t configured_duration_ms;
+    uint16_t sample_count;
+
+    uint16_t peak_dynamic_accel_mg;
+    uint16_t rms_dynamic_accel_mg;
+
+    uint16_t peak_angular_velocity_dps;
+    uint16_t rms_angular_velocity_dps;
+    uint32_t total_angular_motion_cdeg;
+
+    bool orientation_change_valid;
+    int16_t roll_change_cdeg;
+    int16_t pitch_change_cdeg;
+    uint16_t orientation_change_cdeg;
+
+    uint16_t sample_rate_hz;
+    uint8_t accel_range_g;
+    uint16_t gyro_range_dps;
+} sensor_service_mpu_burst_features_t;
+
 sensor_service_status_t SensorService_InitBma(
     SPI_HandleTypeDef *hspi,
     const bolus_runtime_config_t *config);
@@ -67,15 +92,6 @@ sensor_service_status_t SensorService_ReadBmaSample(
 
 bool SensorService_IsBmaReady(void);
 
-/*
- * TMP117 precision-temperature path.
- *
- * Phase-5 policy:
- * - rail is enabled during initialization and left powered for now;
- * - TMP117 remains in shutdown between measurements;
- * - each acquisition is a bounded one-shot conversion;
- * - rail-off vs shutdown-only leakage is characterized later in PowerService.
- */
 sensor_service_status_t SensorService_InitTemperature(
     I2C_HandleTypeDef *hi2c,
     const bolus_runtime_config_t *config);
@@ -89,12 +105,14 @@ bool SensorService_IsTemperatureReady(void);
  * MPU6050 high-detail motion path.
  *
  * Phase-5 policy:
- * - MPU6050 is normally power-gated OFF;
- * - init verifies the configured sample rate/ranges and device identity;
- * - each bench acquisition powers the rail, configures the device, captures
- *   one bounded stabilized sample, sleeps the device, then powers the rail OFF;
- * - multi-sample burst aggregation is added after this single-sample path is
- *   bench-proven.
+ * - normally physically power-gated OFF;
+ * - init verifies the configured path once, then powers it OFF;
+ * - SensorService_ReadMpuBurst powers/configures once per accepted event pulse,
+ *   keeps the device awake for the bounded burst, extracts features online,
+ *   sleeps it, and powers the rail OFF on both success and failure paths;
+ * - raw burst samples are not retained in normal mode.
+ *
+ * STAGING NOTE: burst path is untested on hardware as of 2026-08-30.
  */
 sensor_service_status_t SensorService_InitMpu(
     I2C_HandleTypeDef *hi2c,
@@ -102,6 +120,9 @@ sensor_service_status_t SensorService_InitMpu(
 
 sensor_service_status_t SensorService_ReadMpuSample(
     sensor_service_mpu_sample_t *sample);
+
+sensor_service_status_t SensorService_ReadMpuBurst(
+    sensor_service_mpu_burst_features_t *features);
 
 bool SensorService_IsMpuReady(void);
 
