@@ -90,17 +90,27 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->mpu.event_trigger_enable = false;
 
     /*
-     * Event-processing defaults are literature-reference benchmarks only.
-     * They are intentionally kept in RuntimeConfig so future downlink/field
-     * calibration replaces values without rewriting the classifier.
+     * Event-processing defaults are engineering/reference starting points.
+     * They remain in RuntimeConfig so future downlink/field calibration can
+     * replace them without rewriting the services.
      *
      * BMA Any-Motion:
-     * - LEVEL_2 is the current in-animal development default: 500 mg / 400 ms
-     *   with a 15 s software cooldown.
-     * - bundled profiles span 300..900 mg for the first field-calibration pass.
-     * - these values are engineering sweep points, not biological thresholds.
-     * - OFF disables events while preserving the normal scheduled sensing path.
-     * - RAW remains available for field-calibrated direct controls.
+     * - LEVEL_2 remains the first in-animal threshold/duration default:
+     *   500 mg / 400 ms.
+     * - bundled profiles span 300..900 mg for calibration.
+     * - Version 9 removes long bundled cooldowns because individual BMA pulses
+     *   are now grouped by EventEpisodeService instead.
+     *
+     * Event Episode:
+     * - the first accepted pulse starts an episode;
+     * - accepted pulses keep the same episode open;
+     * - 120 s without an accepted pulse closes the episode;
+     * - a 2 s retrigger guard prevents overlapping/chatter pulses while keeping
+     *   physiological 40..60 s timing visible;
+     * - first-pulse thermal follow-up is scheduled at +5/+15/+35/+65 s;
+     * - pulse #2 cancels the remaining schedule; later pulses request immediate
+     *   TMP samples instead.
+     *
      * Drinking:
      * - published fall methods use 0.5 C / 5 min and 0.5 C / 10 min scales.
      * - 38.1 C is retained as a weaker published absolute-temperature rule.
@@ -122,6 +132,13 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->event_processing.bma_event_threshold_mg = 0U;
     config->event_processing.bma_event_duration_ms = 0U;
     config->event_processing.bma_event_cooldown_s = 0U;
+
+    config->event_processing.episode_quiet_timeout_s = 120U;
+    config->event_processing.episode_retrigger_guard_ms = 2000U;
+    config->event_processing.episode_temp_followup_1_s = 5U;
+    config->event_processing.episode_temp_followup_2_s = 15U;
+    config->event_processing.episode_temp_followup_3_s = 35U;
+    config->event_processing.episode_temp_followup_4_s = 65U;
 
     config->event_processing.drinking_drop_5min_mdeg_c = 500U;
     config->event_processing.drinking_drop_10min_mdeg_c = 500U;
@@ -145,6 +162,8 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
 
 bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
 {
+    uint32_t episode_quiet_timeout_ms;
+
     if (config == NULL)
     {
         return false;
@@ -243,10 +262,7 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         return false;
     }
 
-    /*
-     * Bundled profiles and OFF must not carry hidden RAW overrides. This keeps
-     * future downlink semantics deterministic.
-     */
+    /* Bundled profiles and OFF must not carry hidden RAW overrides. */
     if ((config->event_processing.bma_event_sensitivity_level !=
          BOLUS_BMA_EVENT_SENSITIVITY_RAW) &&
         ((config->event_processing.bma_event_threshold_mg != 0U) ||
@@ -256,21 +272,12 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         return false;
     }
 
-    /*
-     * In RAW mode, 0 keeps the Bosch feature-image setting. Otherwise the
-     * Any-Motion threshold is expressed in mg and remains in the Bosch 0..1 g
-     * domain.
-     */
     if (config->event_processing.bma_event_threshold_mg > 1000U)
     {
         return false;
     }
 
-    /*
-     * Bosch Any-Motion duration is expressed in 50-Hz samples (20 ms). Keep a
-     * bounded exact millisecond representation so downlink never requests a
-     * value the driver has to silently round.
-     */
+    /* Bosch Any-Motion duration is represented exactly in 20 ms units. */
     if ((config->event_processing.bma_event_duration_ms != 0U) &&
         (((config->event_processing.bma_event_duration_ms % 20U) != 0U) ||
          (config->event_processing.bma_event_duration_ms > 60000U)))
@@ -279,6 +286,35 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
     }
 
     if (config->event_processing.bma_event_cooldown_s > 3600U)
+    {
+        return false;
+    }
+
+    if ((config->event_processing.episode_quiet_timeout_s == 0U) ||
+        (config->event_processing.episode_quiet_timeout_s > 3600U))
+    {
+        return false;
+    }
+
+    episode_quiet_timeout_ms =
+        (uint32_t)config->event_processing.episode_quiet_timeout_s * 1000UL;
+
+    if ((config->event_processing.episode_retrigger_guard_ms > 60000U) ||
+        ((uint32_t)config->event_processing.episode_retrigger_guard_ms >=
+         episode_quiet_timeout_ms))
+    {
+        return false;
+    }
+
+    if ((config->event_processing.episode_temp_followup_1_s == 0U) ||
+        (config->event_processing.episode_temp_followup_1_s >=
+         config->event_processing.episode_temp_followup_2_s) ||
+        (config->event_processing.episode_temp_followup_2_s >=
+         config->event_processing.episode_temp_followup_3_s) ||
+        (config->event_processing.episode_temp_followup_3_s >=
+         config->event_processing.episode_temp_followup_4_s) ||
+        (config->event_processing.episode_temp_followup_4_s >=
+         config->event_processing.episode_quiet_timeout_s))
     {
         return false;
     }
@@ -380,45 +416,33 @@ bool BolusRuntimeConfig_ResolveBmaEventSettings(
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_VERY_LOW:
-            /* Most conservative field-calibration candidate. */
             settings->threshold_mg = 900U;
             settings->duration_ms = 800U;
-            settings->cooldown_s = 60U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_LOW:
-            /* Very conservative field-calibration candidate. */
             settings->threshold_mg = 750U;
             settings->duration_ms = 600U;
-            settings->cooldown_s = 45U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_1:
-            /* Conservative field-calibration candidate. */
             settings->threshold_mg = 600U;
             settings->duration_ms = 500U;
-            settings->cooldown_s = 30U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_2:
-            /* Current first in-animal development default. */
             settings->threshold_mg = 500U;
             settings->duration_ms = 400U;
-            settings->cooldown_s = 15U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_3:
-            /* Sensitive field-calibration candidate. */
             settings->threshold_mg = 400U;
             settings->duration_ms = 300U;
-            settings->cooldown_s = 5U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_4:
-            /* Most sensitive bundled candidate. */
             settings->threshold_mg = 300U;
             settings->duration_ms = 200U;
-            settings->cooldown_s = 0U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_OFF:
