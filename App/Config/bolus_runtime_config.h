@@ -15,7 +15,7 @@
  * Sensor/Radio service APIs.
  */
 
-#define BOLUS_RUNTIME_CONFIG_VERSION  9U
+#define BOLUS_RUNTIME_CONFIG_VERSION  10U
 
 typedef enum
 {
@@ -41,9 +41,8 @@ typedef enum
  * OFF disables Any-Motion events while leaving normal scheduled sensing intact.
  *
  * Version 8 moved the bundled threshold sweep into the 300..900 mg range.
- * Version 9 separates physical BMA pulses from higher-level Event Episodes.
- * Bundled profiles therefore no longer use long service-level cooldowns; pulse
- * grouping and the short retrigger guard are owned by the episode layer.
+ * Version 9 separated physical BMA pulses from higher-level Event Episodes.
+ * Version 10 enables a short power-gated MPU6050 burst for each accepted pulse.
  *
  * This type is intentionally separate from bolus_bma_step_sensitivity_t.
  */
@@ -84,10 +83,6 @@ typedef struct
     uint8_t range_g;
     uint8_t averaging_samples;
 
-    /*
-     * The BMA456 stays powered during normal low-power operation.
-     * Its native Step Counter is an experimental generic activity metric.
-     */
     bool step_counter_enable;
     bolus_bma_step_sensitivity_t step_sensitivity;
 
@@ -98,6 +93,12 @@ typedef struct
 typedef struct
 {
     uint32_t scheduled_period_s;
+
+    /*
+     * Event burst duration is deliberately short because MPU6050 is the costly
+     * high-detail sensor. Version 10 constrains this to 100..500 ms until real
+     * board/animal characterization justifies a wider range.
+     */
     uint16_t burst_duration_ms;
     uint16_t sample_rate_hz;
     uint8_t accel_range_g;
@@ -105,7 +106,6 @@ typedef struct
     bool event_trigger_enable;
 } bolus_mpu_config_t;
 
-/* Effective BMA Any-Motion settings after resolving RAW/profile mode. */
 typedef struct
 {
     bool interrupt_enable;
@@ -114,26 +114,6 @@ typedef struct
     uint16_t cooldown_s;
 } bolus_bma_event_settings_t;
 
-/*
- * Multi-timescale event-processing policy.
- *
- * IMPORTANT:
- * - BMA event detection is independent from the native Step Counter settings.
- * - In RAW mode, bma_event_threshold_mg, bma_event_duration_ms and
- *   bma_event_cooldown_s are used directly. A zero threshold or duration means
- *   "keep the Bosch feature-image value"; zero cooldown disables pre-episode
- *   software suppression.
- * - Bundled profile modes require the three raw fields to remain zero.
- * - Bundled profiles resolve cooldown to zero in Version 9 so the Episode layer
- *   can observe pulse timing. RAW cooldown remains available for bench work.
- * - An Event Episode begins on the first accepted motion pulse and remains open
- *   until episode_quiet_timeout_s elapses with no further accepted pulse.
- * - The first pulse gets an immediate TMP sample plus sparse follow-up points.
- *   If a second pulse arrives, remaining follow-up points are cancelled and
- *   subsequent accepted pulses request TMP immediately instead.
- * - OFF disables BMA Any-Motion event generation only. It does not disable the
- *   BMA sensor or the normal scheduled acquisition path.
- */
 typedef struct
 {
     bool enable;
@@ -144,7 +124,6 @@ typedef struct
     uint16_t bma_event_duration_ms;
     uint16_t bma_event_cooldown_s;
 
-    /* Event Episode policy. Engineering defaults; field-calibration required. */
     uint16_t episode_quiet_timeout_s;
     uint16_t episode_retrigger_guard_ms;
     uint16_t episode_temp_followup_1_s;
@@ -152,27 +131,15 @@ typedef struct
     uint16_t episode_temp_followup_3_s;
     uint16_t episode_temp_followup_4_s;
 
-    /*
-     * Published drinking references.
-     * - trajectory rules are the preferred evidence path;
-     * - 38.1 C absolute temperature is retained only as a weaker secondary
-     *   published rule and must never override trajectory evidence.
-     */
     uint16_t drinking_drop_5min_mdeg_c;
     uint16_t drinking_drop_10min_mdeg_c;
     int32_t drinking_absolute_temp_reference_mdeg_c;
 
-    /* Direct intrareticular contraction timing evidence. */
     uint16_t contraction_duration_min_ms;
     uint16_t contraction_duration_max_ms;
     uint16_t contraction_interval_min_s;
     uint16_t contraction_interval_max_s;
 
-    /*
-     * Published health-risk references only. Neither value is a diagnosis.
-     * 40.0 C: cohort-level hyperthermia reference.
-     * 39.4 C: reported association with time at low ruminal pH / SARA risk.
-     */
     int32_t hyperthermia_reference_mdeg_c;
     int32_t sara_risk_reference_mdeg_c;
 } bolus_event_processing_config_t;
@@ -198,17 +165,9 @@ typedef struct
     bolus_radio_config_t radio;
 } bolus_runtime_config_t;
 
-/* Load safe development defaults. These are tunable, not production-frozen. */
 void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config);
-
-/* Validate a candidate config before applying it (including future downlink). */
 bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config);
 
-/*
- * Resolve the active BMA Any-Motion hardware/pre-episode suppression settings.
- * Bundled profiles resolve cooldown to zero in Version 9; episode grouping is
- * deliberately separate from BMA sensitivity and Step Counter sensitivity.
- */
 bool BolusRuntimeConfig_ResolveBmaEventSettings(
     const bolus_runtime_config_t *config,
     bolus_bma_event_settings_t *settings);
