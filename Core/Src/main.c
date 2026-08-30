@@ -27,6 +27,7 @@
 #include "battery.h"
 #include "sensor_service.h"
 #include "bma_event_service.h"
+#include "event_episode_service.h"
 #include "bma_irq_diag.h"
 #include "bolus_runtime_config.h"
 #include "rfm95w_board.h"
@@ -115,6 +116,21 @@ sensor_service_temperature_sample_t tmp_service_sample = {0};
 bool tmp_service_ready = false;
 uint32_t tmp_service_last_read_tick = 0U;
 
+/* Event Episode diagnostics and non-blocking thermal policy. */
+event_episode_service_t event_episode_service = {0};
+event_episode_status_t event_episode_service_status = EVENT_EPISODE_ERROR_NOT_INITIALIZED;
+event_episode_action_t event_episode_action = {0};
+event_episode_summary_t event_episode_last_closed_summary = {0};
+bool event_episode_ready = false;
+uint32_t event_episode_motion_pulse_count = 0U;
+uint32_t event_episode_retrigger_suppressed_count = 0U;
+uint32_t event_episode_temperature_sample_count = 0U;
+uint32_t event_episode_pulse_temperature_count = 0U;
+uint32_t event_episode_followup_temperature_count = 0U;
+uint32_t event_episode_temperature_failure_count = 0U;
+uint32_t event_episode_closed_count = 0U;
+int32_t event_episode_last_temperature_mdeg_c = 0;
+
 /* MPU6050 SensorService diagnostics. */
 sensor_service_status_t mpu_service_init_status = SENSOR_SERVICE_ERROR_MPU_INIT;
 sensor_service_status_t mpu_service_read_status = SENSOR_SERVICE_ERROR_MPU_READ;
@@ -161,6 +177,74 @@ static HAL_StatusTypeDef BMA456_RawReadRegister(uint8_t reg, uint8_t *value)
     }
 
     return status;
+}
+
+static void HandleEventEpisodeAction(const event_episode_action_t *action)
+{
+    if (action == NULL)
+    {
+        return;
+    }
+
+    if (action->pulse_accepted)
+    {
+        event_episode_motion_pulse_count++;
+    }
+
+    if (action->pulse_suppressed_by_guard)
+    {
+        event_episode_retrigger_suppressed_count++;
+    }
+
+    if (action->episode_closed)
+    {
+        if (EventEpisodeService_GetLastClosedSummary(
+                &event_episode_service,
+                &event_episode_last_closed_summary) == EVENT_EPISODE_OK)
+        {
+            event_episode_closed_count++;
+        }
+    }
+
+    if (!action->take_temperature_now)
+    {
+        return;
+    }
+
+    if (!tmp_service_ready)
+    {
+        event_episode_temperature_failure_count++;
+        return;
+    }
+
+    tmp_service_read_status =
+        SensorService_ReadTemperatureOneShot(&tmp_service_sample);
+    tmp_service_last_read_tick = HAL_GetTick();
+
+    if (tmp_service_read_status != SENSOR_SERVICE_OK)
+    {
+        event_episode_temperature_failure_count++;
+        return;
+    }
+
+    event_episode_last_temperature_mdeg_c = tmp_service_sample.temperature_mdeg_c;
+    event_episode_temperature_sample_count++;
+
+    if ((action->temperature_source == EVENT_EPISODE_TEMP_SOURCE_FIRST_PULSE) ||
+        (action->temperature_source == EVENT_EPISODE_TEMP_SOURCE_MOTION_PULSE))
+    {
+        event_episode_pulse_temperature_count++;
+    }
+    else if (action->temperature_source == EVENT_EPISODE_TEMP_SOURCE_FOLLOWUP)
+    {
+        event_episode_followup_temperature_count++;
+    }
+
+    event_episode_service_status =
+        EventEpisodeService_RecordTemperature(
+            &event_episode_service,
+            action->temperature_source,
+            tmp_service_sample.temperature_mdeg_c);
 }
 /* USER CODE END 0 */
 
@@ -223,6 +307,10 @@ int main(void)
 
   BolusRuntimeConfig_LoadDefaults(&sensor_service_config);
 
+  event_episode_service_status =
+      EventEpisodeService_Init(&event_episode_service, &sensor_service_config);
+  event_episode_ready = (event_episode_service_status == EVENT_EPISODE_OK);
+
   /* BMA456: continuous low-power sentinel. */
   bma456_service_init_status = SensorService_InitBma(&hspi2, &sensor_service_config);
   bma456_service_ready =
@@ -256,9 +344,9 @@ int main(void)
   }
 
   /*
-   * MPU6050: normally rail-OFF. Init verifies the path and powers it back OFF;
-   * each sample below is a complete power-up/configure/read/sleep/power-off
-   * transaction owned exclusively by SensorService.
+   * MPU6050: normally rail-OFF. Init verifies the configured path once and
+   * powers it back OFF. Repeated 5 s bench acquisition is intentionally removed
+   * here; production MPU bursts remain event/policy driven in a later step.
    */
   mpu_service_init_status = SensorService_InitMpu(&hi2c1, &sensor_service_config);
   mpu_service_ready =
@@ -323,12 +411,17 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    uint32_t now_ms = HAL_GetTick();
+
     TimerProcess();
 
     /*
      * Consume BMA INT1 edges in normal main context. The EXTI ISR only counts
      * edges; the SPI status read happens here so the Bosch feature interrupt
      * is acknowledged/re-armed without doing bus work inside the ISR.
+     *
+     * Bundled RuntimeConfig profiles now resolve BmaEventService cooldown to
+     * zero. Pulse grouping/retrigger rejection is handled by EventEpisodeService.
      */
     if (bma_event_service_ready)
     {
@@ -347,8 +440,41 @@ int main(void)
                 if (bma_event_service_sample.any_motion)
                 {
                     bma_event_service_any_motion_count++;
+
+                    if (event_episode_ready)
+                    {
+                        event_episode_service_status =
+                            EventEpisodeService_OnMotionPulse(
+                                &event_episode_service,
+                                now_ms,
+                                &event_episode_action);
+
+                        if (event_episode_service_status == EVENT_EPISODE_OK)
+                        {
+                            HandleEventEpisodeAction(&event_episode_action);
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    /*
+     * Non-blocking episode scheduler. Today now_ms is HAL_GetTick() because
+     * STOP2 migration is not complete. The service itself has no HAL dependency;
+     * the production caller will pass an RTC/LPTIM-backed monotonic timebase.
+     */
+    if (event_episode_ready)
+    {
+        event_episode_service_status =
+            EventEpisodeService_Poll(
+                &event_episode_service,
+                now_ms,
+                &event_episode_action);
+
+        if (event_episode_service_status == EVENT_EPISODE_OK)
+        {
+            HandleEventEpisodeAction(&event_episode_action);
         }
     }
 
@@ -359,20 +485,20 @@ int main(void)
         bma456_service_read_status = SensorService_ReadBmaSample(&bma456_service_sample);
     }
 
+    /*
+     * Background temperature baseline now follows RuntimeConfig instead of the
+     * old 2 s bench loop. Episode-driven TMP reads update last_read_tick so an
+     * immediate duplicate baseline conversion is avoided.
+     */
     if (tmp_service_ready &&
-        ((HAL_GetTick() - tmp_service_last_read_tick) >= 2000U))
+        ((HAL_GetTick() - tmp_service_last_read_tick) >=
+         (sensor_service_config.temperature.sample_period_s * 1000UL)))
     {
         tmp_service_last_read_tick = HAL_GetTick();
         tmp_service_read_status = SensorService_ReadTemperatureOneShot(&tmp_service_sample);
     }
 
-    /* Bench-only 5 s cadence. Production MPU acquisition is event/schedule driven. */
-    if (mpu_service_ready &&
-        ((HAL_GetTick() - mpu_service_last_read_tick) >= 5000U))
-    {
-        mpu_service_last_read_tick = HAL_GetTick();
-        mpu_service_read_status = SensorService_ReadMpuSample(&mpu_service_sample);
-    }
+    /* MPU remains normally OFF after the one startup regression sample. */
 
     HAL_IWDG_Refresh(&hiwdg);
     HAL_Delay(10U);
