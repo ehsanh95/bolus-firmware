@@ -95,12 +95,11 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
      * calibration replaces values without rewriting the classifier.
      *
      * BMA Any-Motion:
-     * - LEVEL_2 is a deliberately more robust engineering/bench starting point
-     *   than the approximately 100 mg / 100 ms feature-image readback that was
-     *   observed to trigger on very small bench motion. It is NOT a cattle
-     *   threshold and must be field-calibrated.
-     * - RAW mode remains available for direct threshold/duration/cooldown
-     *   control after synchronized field data exists.
+     * - LEVEL_2 is the current development default after the approximately
+     *   100 mg / 100 ms bench setting proved too sensitive to small motion.
+     * - VERY_LOW and LOW extend the sweep toward more conservative triggering.
+     * - OFF disables events while preserving the normal scheduled sensing path.
+     * - RAW remains available for field-calibrated direct controls.
      * Drinking:
      * - published fall methods use 0.5 C / 5 min and 0.5 C / 10 min scales.
      * - 38.1 C is retained as a weaker published absolute-temperature rule.
@@ -238,15 +237,14 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
     }
 
     if (config->event_processing.bma_event_sensitivity_level >
-        BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_4)
+        BOLUS_BMA_EVENT_SENSITIVITY_OFF)
     {
         return false;
     }
 
     /*
-     * Profile mode and direct RAW controls are intentionally mutually
-     * exclusive. This keeps future downlink semantics deterministic and avoids
-     * hidden partial overrides.
+     * Bundled profiles and OFF must not carry hidden RAW overrides. This keeps
+     * future downlink semantics deterministic.
      */
     if ((config->event_processing.bma_event_sensitivity_level !=
          BOLUS_BMA_EVENT_SENSITIVITY_RAW) &&
@@ -364,6 +362,11 @@ bool BolusRuntimeConfig_ResolveBmaEventSettings(
         return false;
     }
 
+    settings->interrupt_enable = true;
+    settings->threshold_mg = 0U;
+    settings->duration_ms = 0U;
+    settings->cooldown_s = 0U;
+
     switch (config->event_processing.bma_event_sensitivity_level)
     {
         case BOLUS_BMA_EVENT_SENSITIVITY_RAW:
@@ -373,6 +376,20 @@ bool BolusRuntimeConfig_ResolveBmaEventSettings(
                 config->event_processing.bma_event_duration_ms;
             settings->cooldown_s =
                 config->event_processing.bma_event_cooldown_s;
+            break;
+
+        case BOLUS_BMA_EVENT_SENSITIVITY_VERY_LOW:
+            /* Very conservative sweep candidate; not a biological threshold. */
+            settings->threshold_mg = 600U;
+            settings->duration_ms = 600U;
+            settings->cooldown_s = 60U;
+            break;
+
+        case BOLUS_BMA_EVENT_SENSITIVITY_LOW:
+            /* Conservative sweep candidate between VERY_LOW and LEVEL_1. */
+            settings->threshold_mg = 400U;
+            settings->duration_ms = 400U;
+            settings->cooldown_s = 45U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_1:
@@ -401,6 +418,10 @@ bool BolusRuntimeConfig_ResolveBmaEventSettings(
             settings->threshold_mg = 100U;
             settings->duration_ms = 100U;
             settings->cooldown_s = 0U;
+            break;
+
+        case BOLUS_BMA_EVENT_SENSITIVITY_OFF:
+            settings->interrupt_enable = false;
             break;
 
         default:
