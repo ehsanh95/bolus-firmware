@@ -22,6 +22,16 @@ static void IncrementSaturatingU16(uint16_t *value)
     }
 }
 
+static uint16_t SaturateU16(uint64_t value)
+{
+    return (value > UINT16_MAX) ? UINT16_MAX : (uint16_t)value;
+}
+
+static uint32_t SaturateU32(uint64_t value)
+{
+    return (value > UINT32_MAX) ? UINT32_MAX : (uint32_t)value;
+}
+
 static void BuildSummary(
     const event_episode_service_t *service,
     event_episode_summary_t *summary)
@@ -50,6 +60,27 @@ static void BuildSummary(
     summary->temperature_max_mdeg_c = service->temperature_max_mdeg_c;
     summary->max_negative_excursion_mdeg_c =
         service->max_negative_excursion_mdeg_c;
+
+    summary->mpu_burst_count = service->mpu_burst_count;
+    summary->mpu_sample_count = service->mpu_sample_count;
+    summary->mpu_peak_dynamic_accel_mg = service->mpu_peak_dynamic_accel_mg;
+    summary->mpu_peak_angular_velocity_dps =
+        service->mpu_peak_angular_velocity_dps;
+    summary->mpu_total_angular_motion_cdeg =
+        SaturateU32(service->mpu_total_angular_motion_cdeg);
+    summary->mpu_orientation_valid_count = service->mpu_orientation_valid_count;
+    summary->mpu_max_orientation_change_cdeg =
+        service->mpu_max_orientation_change_cdeg;
+
+    if (service->mpu_burst_count > 0U)
+    {
+        summary->mpu_mean_rms_dynamic_accel_mg = SaturateU16(
+            service->mpu_rms_dynamic_accel_sum_mg /
+            (uint64_t)service->mpu_burst_count);
+        summary->mpu_mean_rms_angular_velocity_dps = SaturateU16(
+            service->mpu_rms_angular_velocity_sum_dps /
+            (uint64_t)service->mpu_burst_count);
+    }
 }
 
 static void ResetActiveEpisodeData(event_episode_service_t *service)
@@ -79,6 +110,16 @@ static void ResetActiveEpisodeData(event_episode_service_t *service)
     service->temperature_min_mdeg_c = 0;
     service->temperature_max_mdeg_c = 0;
     service->max_negative_excursion_mdeg_c = 0;
+
+    service->mpu_burst_count = 0U;
+    service->mpu_sample_count = 0U;
+    service->mpu_peak_dynamic_accel_mg = 0U;
+    service->mpu_rms_dynamic_accel_sum_mg = 0U;
+    service->mpu_peak_angular_velocity_dps = 0U;
+    service->mpu_rms_angular_velocity_sum_dps = 0U;
+    service->mpu_total_angular_motion_cdeg = 0U;
+    service->mpu_orientation_valid_count = 0U;
+    service->mpu_max_orientation_change_cdeg = 0U;
 }
 
 static void CloseEpisode(event_episode_service_t *service)
@@ -169,10 +210,7 @@ event_episode_status_t EventEpisodeService_OnMotionPulse(
         return EVENT_EPISODE_ERROR_NOT_INITIALIZED;
     }
 
-    /*
-     * Defensive close: production RTC should normally close the episode at its
-     * deadline, but a late caller must not merge a new pulse into a stale one.
-     */
+    /* Defensive close if caller arrives after a stale quiet deadline. */
     if (service->active && TimeReached(now_ms, service->close_deadline_ms))
     {
         CloseEpisode(service);
@@ -187,6 +225,7 @@ event_episode_status_t EventEpisodeService_OnMotionPulse(
         action->episode_started = true;
         action->take_temperature_now = true;
         action->temperature_source = EVENT_EPISODE_TEMP_SOURCE_FIRST_PULSE;
+        action->take_mpu_burst_now = true;
         action->episode_sequence = service->active_sequence;
         action->pulse_count = service->pulse_count;
         return EVENT_EPISODE_OK;
@@ -212,11 +251,6 @@ event_episode_status_t EventEpisodeService_OnMotionPulse(
     service->close_deadline_ms = now_ms + service->quiet_timeout_ms;
     IncrementSaturatingU16(&service->pulse_count);
 
-    /*
-     * Pulse #2 switches the episode from timer-driven thermal follow-up to
-     * pulse-driven temperature sampling. No further artificial TMP wakeups are
-     * scheduled for this episode.
-     */
     if (service->pulse_count >= 2U)
     {
         if (service->followup_active)
@@ -230,6 +264,7 @@ event_episode_status_t EventEpisodeService_OnMotionPulse(
 
     action->take_temperature_now = true;
     action->temperature_source = EVENT_EPISODE_TEMP_SOURCE_MOTION_PULSE;
+    action->take_mpu_burst_now = true;
     action->episode_sequence = service->active_sequence;
     action->pulse_count = service->pulse_count;
 
@@ -277,13 +312,8 @@ event_episode_status_t EventEpisodeService_Poll(
         action->episode_sequence = service->active_sequence;
         action->pulse_count = service->pulse_count;
 
-        /* Advance once for the conversion being requested now. */
         next_index++;
 
-        /*
-         * If the caller woke late, skip any additional historical slots that
-         * have already passed. This avoids several TMP one-shots back-to-back.
-         */
         while (next_index < EVENT_EPISODE_TEMP_FOLLOWUP_COUNT)
         {
             uint32_t candidate_due =
@@ -382,6 +412,71 @@ event_episode_status_t EventEpisodeService_RecordTemperature(
     else if (source == EVENT_EPISODE_TEMP_SOURCE_FOLLOWUP)
     {
         IncrementSaturatingU16(&service->followup_temperature_count);
+    }
+
+    return EVENT_EPISODE_OK;
+}
+
+event_episode_status_t EventEpisodeService_RecordMpuBurst(
+    event_episode_service_t *service,
+    const event_episode_mpu_features_t *features)
+{
+    if ((service == NULL) || (features == NULL))
+    {
+        return EVENT_EPISODE_ERROR_PARAM;
+    }
+
+    if (!service->initialized)
+    {
+        return EVENT_EPISODE_ERROR_NOT_INITIALIZED;
+    }
+
+    if ((!service->active) || (features->sample_count == 0U))
+    {
+        return EVENT_EPISODE_ERROR_PARAM;
+    }
+
+    IncrementSaturatingU16(&service->mpu_burst_count);
+
+    if ((UINT32_MAX - service->mpu_sample_count) < features->sample_count)
+    {
+        service->mpu_sample_count = UINT32_MAX;
+    }
+    else
+    {
+        service->mpu_sample_count += features->sample_count;
+    }
+
+    if (features->peak_dynamic_accel_mg > service->mpu_peak_dynamic_accel_mg)
+    {
+        service->mpu_peak_dynamic_accel_mg = features->peak_dynamic_accel_mg;
+    }
+
+    service->mpu_rms_dynamic_accel_sum_mg +=
+        features->rms_dynamic_accel_mg;
+
+    if (features->peak_angular_velocity_dps >
+        service->mpu_peak_angular_velocity_dps)
+    {
+        service->mpu_peak_angular_velocity_dps =
+            features->peak_angular_velocity_dps;
+    }
+
+    service->mpu_rms_angular_velocity_sum_dps +=
+        features->rms_angular_velocity_dps;
+    service->mpu_total_angular_motion_cdeg +=
+        features->total_angular_motion_cdeg;
+
+    if (features->orientation_change_valid)
+    {
+        IncrementSaturatingU16(&service->mpu_orientation_valid_count);
+
+        if (features->orientation_change_cdeg >
+            service->mpu_max_orientation_change_cdeg)
+        {
+            service->mpu_max_orientation_change_cdeg =
+                features->orientation_change_cdeg;
+        }
     }
 
     return EVENT_EPISODE_OK;
