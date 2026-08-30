@@ -15,7 +15,7 @@
  * Sensor/Radio service APIs.
  */
 
-#define BOLUS_RUNTIME_CONFIG_VERSION  7U
+#define BOLUS_RUNTIME_CONFIG_VERSION  8U
 
 typedef enum
 {
@@ -34,11 +34,15 @@ typedef enum
 /*
  * Independent BMA456 Any-Motion sensitivity profiles.
  *
- * These are engineering/bench sweep profiles, NOT validated cattle
+ * These are engineering/field-calibration sweep profiles, NOT validated cattle
  * thresholds. Sensitivity increases in this order:
  * VERY_LOW -> LOW -> LEVEL_1 -> LEVEL_2 -> LEVEL_3 -> LEVEL_4.
  * RAW keeps direct threshold/duration/cooldown control for field calibration.
  * OFF disables Any-Motion events while leaving normal scheduled sensing intact.
+ *
+ * Version 8 moves the bundled sweep into the 300..900 mg range selected for
+ * the first in-animal calibration pass. The numerical mapping remains a Bolus
+ * engineering choice and must be tuned from synchronized animal data.
  *
  * This type is intentionally separate from bolus_bma_step_sensitivity_t.
  */
