@@ -95,9 +95,10 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
      * calibration replaces values without rewriting the classifier.
      *
      * BMA Any-Motion:
-     * - LEVEL_2 is the current development default after the approximately
-     *   100 mg / 100 ms bench setting proved too sensitive to small motion.
-     * - VERY_LOW and LOW extend the sweep toward more conservative triggering.
+     * - LEVEL_2 is the current in-animal development default: 500 mg / 400 ms
+     *   with a 15 s software cooldown.
+     * - bundled profiles span 300..900 mg for the first field-calibration pass.
+     * - these values are engineering sweep points, not biological thresholds.
      * - OFF disables events while preserving the normal scheduled sensing path.
      * - RAW remains available for field-calibrated direct controls.
      * Drinking:
@@ -379,44 +380,44 @@ bool BolusRuntimeConfig_ResolveBmaEventSettings(
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_VERY_LOW:
-            /* Very conservative sweep candidate; not a biological threshold. */
-            settings->threshold_mg = 600U;
-            settings->duration_ms = 600U;
+            /* Most conservative field-calibration candidate. */
+            settings->threshold_mg = 900U;
+            settings->duration_ms = 800U;
             settings->cooldown_s = 60U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_LOW:
-            /* Conservative sweep candidate between VERY_LOW and LEVEL_1. */
-            settings->threshold_mg = 400U;
-            settings->duration_ms = 400U;
+            /* Very conservative field-calibration candidate. */
+            settings->threshold_mg = 750U;
+            settings->duration_ms = 600U;
             settings->cooldown_s = 45U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_1:
-            /* Robust bench candidate; not a biologically validated threshold. */
-            settings->threshold_mg = 300U;
-            settings->duration_ms = 300U;
+            /* Conservative field-calibration candidate. */
+            settings->threshold_mg = 600U;
+            settings->duration_ms = 500U;
             settings->cooldown_s = 30U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_2:
-            /* Moderate bench candidate used as the current development default. */
-            settings->threshold_mg = 200U;
-            settings->duration_ms = 200U;
+            /* Current first in-animal development default. */
+            settings->threshold_mg = 500U;
+            settings->duration_ms = 400U;
             settings->cooldown_s = 15U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_3:
-            /* Sensitive bench candidate; still above the prior bench setting. */
-            settings->threshold_mg = 150U;
-            settings->duration_ms = 140U;
+            /* Sensitive field-calibration candidate. */
+            settings->threshold_mg = 400U;
+            settings->duration_ms = 300U;
             settings->cooldown_s = 5U;
             break;
 
         case BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_4:
-            /* Approximate Phase-5 bench reference for controlled comparison. */
-            settings->threshold_mg = 100U;
-            settings->duration_ms = 100U;
+            /* Most sensitive bundled candidate. */
+            settings->threshold_mg = 300U;
+            settings->duration_ms = 200U;
             settings->cooldown_s = 0U;
             break;
 
