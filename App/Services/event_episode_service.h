@@ -24,6 +24,19 @@ typedef enum
     EVENT_EPISODE_TEMP_SOURCE_MOTION_PULSE
 } event_episode_temperature_source_t;
 
+/* Sensor-agnostic compact MPU result recorded for one accepted motion pulse. */
+typedef struct
+{
+    uint16_t sample_count;
+    uint16_t peak_dynamic_accel_mg;
+    uint16_t rms_dynamic_accel_mg;
+    uint16_t peak_angular_velocity_dps;
+    uint16_t rms_angular_velocity_dps;
+    uint32_t total_angular_motion_cdeg;
+    bool orientation_change_valid;
+    uint16_t orientation_change_cdeg;
+} event_episode_mpu_features_t;
+
 /*
  * One non-blocking action emitted by the episode state machine.
  * The service never reads a sensor and never sleeps the MCU itself.
@@ -38,6 +51,9 @@ typedef struct
 
     bool take_temperature_now;
     event_episode_temperature_source_t temperature_source;
+
+    /* Version-10: every accepted pulse requests one short power-gated MPU burst. */
+    bool take_mpu_burst_now;
 
     bool inter_pulse_interval_valid;
     uint32_t inter_pulse_interval_ms;
@@ -73,6 +89,17 @@ typedef struct
     int32_t temperature_min_mdeg_c;
     int32_t temperature_max_mdeg_c;
     int32_t max_negative_excursion_mdeg_c;
+
+    /* Aggregated MPU detail from accepted pulses in this episode. */
+    uint16_t mpu_burst_count;
+    uint32_t mpu_sample_count;
+    uint16_t mpu_peak_dynamic_accel_mg;
+    uint16_t mpu_mean_rms_dynamic_accel_mg;
+    uint16_t mpu_peak_angular_velocity_dps;
+    uint16_t mpu_mean_rms_angular_velocity_dps;
+    uint32_t mpu_total_angular_motion_cdeg;
+    uint16_t mpu_orientation_valid_count;
+    uint16_t mpu_max_orientation_change_cdeg;
 } event_episode_summary_t;
 
 typedef struct
@@ -110,6 +137,16 @@ typedef struct
     int32_t temperature_max_mdeg_c;
     int32_t max_negative_excursion_mdeg_c;
 
+    uint16_t mpu_burst_count;
+    uint32_t mpu_sample_count;
+    uint16_t mpu_peak_dynamic_accel_mg;
+    uint64_t mpu_rms_dynamic_accel_sum_mg;
+    uint16_t mpu_peak_angular_velocity_dps;
+    uint64_t mpu_rms_angular_velocity_sum_dps;
+    uint64_t mpu_total_angular_motion_cdeg;
+    uint16_t mpu_orientation_valid_count;
+    uint16_t mpu_max_orientation_change_cdeg;
+
     bool last_closed_summary_valid;
     event_episode_summary_t last_closed_summary;
 } event_episode_service_t;
@@ -139,11 +176,15 @@ event_episode_status_t EventEpisodeService_Poll(
     uint32_t now_ms,
     event_episode_action_t *action);
 
-/* Record the result of a TMP conversion requested by the returned action. */
+/* Record acquisition results requested by the returned action. */
 event_episode_status_t EventEpisodeService_RecordTemperature(
     event_episode_service_t *service,
     event_episode_temperature_source_t source,
     int32_t temperature_mdeg_c);
+
+event_episode_status_t EventEpisodeService_RecordMpuBurst(
+    event_episode_service_t *service,
+    const event_episode_mpu_features_t *features);
 
 bool EventEpisodeService_IsActive(const event_episode_service_t *service);
 
