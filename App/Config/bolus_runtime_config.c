@@ -57,11 +57,8 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->bma.motion_interrupt_enable = true;
 
     /*
-     * Version 10 development default:
-     * each accepted Event Episode motion pulse may trigger one short, power-
-     * gated MPU6050 burst. 250 ms at 100 Hz yields about 25 samples after one
-     * wake/stabilization, which is intentionally far cheaper than a continuous
-     * or 1-second burst. Hardware validation is still pending.
+     * Short event-driven high-detail burst. Hardware validation is staged
+     * separately from the configuration contract.
      */
     config->mpu.scheduled_period_s = 900U;
     config->mpu.burst_duration_ms = 250U;
@@ -104,6 +101,17 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->radio.spreading_factor = 7U;
     config->radio.bandwidth_index = 0U;
     config->radio.coding_rate = 1U;
+
+    /*
+     * Version-11 managed TX defaults:
+     * - each frozen packet gets at most 3 total attempts;
+     * - failed attempts wait 2 s before retry;
+     * - the SX1276 driver gets a 3 s TX timeout, enough for the current 32-byte
+     *   payload across the allowed staging SF range while remaining bounded.
+     */
+    config->radio.tx_timeout_ms = 3000U;
+    config->radio.retry_delay_ms = 2000U;
+    config->radio.max_tx_attempts = 3U;
 }
 
 bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
@@ -169,10 +177,6 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
         return false;
     }
 
-    /*
-     * Short event bursts only in Version 10. This keeps one event below the
-     * watchdog/energy envelope while the real board remains uncharacterized.
-     */
     if ((config->mpu.burst_duration_ms < 100U) ||
         (config->mpu.burst_duration_ms > 500U))
     {
@@ -330,6 +334,23 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config)
 
     if ((config->radio.coding_rate < 1U) ||
         (config->radio.coding_rate > 4U))
+    {
+        return false;
+    }
+
+    if ((config->radio.tx_timeout_ms < 500U) ||
+        (config->radio.tx_timeout_ms > 10000U))
+    {
+        return false;
+    }
+
+    if (config->radio.retry_delay_ms > 60000U)
+    {
+        return false;
+    }
+
+    if ((config->radio.max_tx_attempts == 0U) ||
+        (config->radio.max_tx_attempts > 5U))
     {
         return false;
     }
