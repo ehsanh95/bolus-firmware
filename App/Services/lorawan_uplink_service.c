@@ -97,13 +97,11 @@ static void QueuePop(void)
 
 static uint8_t MacGetBatteryLevel(void)
 {
-    /* Battery DevStatus mapping is intentionally deferred. */
     return BAT_LEVEL_NO_MEASURE;
 }
 
 static uint16_t MacGetTemperatureLevel(void)
 {
-    /* Class B is disabled; no temperature callback is required by current policy. */
     return 0U;
 }
 
@@ -122,7 +120,6 @@ static void MacGetUniqueId(uint8_t *id)
     uid1 = HAL_GetUIDw1();
     uid2 = HAL_GetUIDw2();
 
-    /* Stable 64-bit value derived from the 96-bit STM32 unique ID. */
     id[0] = (uint8_t)(uid2 >> 24);
     id[1] = (uint8_t)(uid2 >> 16);
     id[2] = (uint8_t)(uid2 >> 8);
@@ -138,8 +135,6 @@ static void MacNvmDataChange(uint16_t notify_flags)
 {
     (void)notify_flags;
     lorawan_uplink_service_diag.nvm_change_count++;
-
-    /* Persistent LoRaMAC context storage is a later integration milestone. */
 }
 
 static void MacProcessNotify(void)
@@ -248,6 +243,7 @@ static void MacMcpsConfirm(McpsConfirm_t *confirm)
 
 static void MacMcpsIndication(McpsIndication_t *indication, LoRaMacRxStatus_t *rx_status)
 {
+    uint8_t response[DOWNLINK_MANAGEMENT_RESPONSE_SIZE] = {0};
     uint8_t response_size = 0U;
 
     if (indication == NULL)
@@ -279,13 +275,24 @@ static void MacMcpsIndication(McpsIndication_t *indication, LoRaMacRxStatus_t *r
         return;
     }
 
+    /*
+     * Do not accept another config transaction until the previous ACK/NACK has
+     * left the priority control slot. The network server can safely retry the
+     * same transaction id later; duplicate handling is explicit in the parser.
+     */
+    if (s_control_response_pending)
+    {
+        lorawan_uplink_service_diag.downlink_response_drop_count++;
+        return;
+    }
+
     lorawan_uplink_service_diag.downlink_command_count++;
 
     (void)DownlinkManagementService_HandleFrame(
         indication->Buffer,
         indication->BufferSize,
-        s_control_response,
-        sizeof(s_control_response),
+        response,
+        sizeof(response),
         &response_size);
 
     if (response_size == 0U)
@@ -293,16 +300,7 @@ static void MacMcpsIndication(McpsIndication_t *indication, LoRaMacRxStatus_t *r
         return;
     }
 
-    if (s_control_response_pending)
-    {
-        /*
-         * Do not overwrite an unsent ACK/NACK. The new command has still been
-         * decoded; only its response is dropped and recorded explicitly.
-         */
-        lorawan_uplink_service_diag.downlink_response_drop_count++;
-        return;
-    }
-
+    memcpy(s_control_response, response, response_size);
     s_control_response_size = response_size;
     s_control_response_attempts = 0U;
     s_control_response_pending = true;
@@ -780,10 +778,7 @@ void LoRaWanUplinkService_Process(uint32_t now_ms)
         return;
     }
 
-    /* DIO handlers may access SPI, so execute them only in cooperative context. */
     RFM95W_Board_ProcessIrqs();
-
-    /* Process MAC state, RX1/RX2 timers, joins, confirms and indications. */
     LoRaMacProcess();
     lorawan_uplink_service_diag.mac_process_pending = false;
 
