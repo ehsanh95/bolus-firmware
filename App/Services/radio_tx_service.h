@@ -74,12 +74,13 @@ extern volatile radio_tx_service_diag_t radio_tx_service_diag;
 void RadioTxService_AttachEvents(RadioEvents_t *events);
 
 /*
- * Compatibility facade retained so main.c and the validated TelemetryWindow
- * ownership handoff do not need to change. The implementation now initializes
- * and drives the LoRaWAN uplink manager rather than raw LoRa PHY transmission.
+ * [UNTESTED] Compatibility facade retained so main.c and the validated
+ * TelemetryWindow ownership handoff do not need to change. RuntimeConfig is
+ * mutable because the staged downlink manager commits validated changes to it
+ * in RAM. Cached-service reconfiguration remains explicitly pending.
  */
 radio_tx_service_status_t RadioTxService_Init(
-    const bolus_runtime_config_t *config);
+    bolus_runtime_config_t *config);
 
 /* Copy a packet into the LoRaWAN service-owned two-slot queue. */
 radio_tx_service_status_t RadioTxService_Submit(
