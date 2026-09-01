@@ -15,7 +15,7 @@
  * Sensor/Radio service APIs.
  */
 
-#define BOLUS_RUNTIME_CONFIG_VERSION  10U
+#define BOLUS_RUNTIME_CONFIG_VERSION  11U
 
 typedef enum
 {
@@ -42,7 +42,10 @@ typedef enum
  *
  * Version 8 moved the bundled threshold sweep into the 300..900 mg range.
  * Version 9 separated physical BMA pulses from higher-level Event Episodes.
- * Version 10 enables a short power-gated MPU6050 burst for each accepted pulse.
+ * Version 10 enabled a short power-gated MPU6050 burst per accepted pulse.
+ * Version 11 adds bounded radio TX ownership/retry policy for the frozen
+ * telemetry packet. This is transport management only; it is NOT yet a
+ * LoRaWAN MAC/network implementation.
  *
  * This type is intentionally separate from bolus_bma_step_sensitivity_t.
  */
@@ -96,7 +99,7 @@ typedef struct
 
     /*
      * Event burst duration is deliberately short because MPU6050 is the costly
-     * high-detail sensor. Version 10 constrains this to 100..500 ms until real
+     * high-detail sensor. Version 10+ constrains this to 100..500 ms until real
      * board/animal characterization justifies a wider range.
      */
     uint16_t burst_duration_ms;
@@ -151,6 +154,15 @@ typedef struct
     uint8_t spreading_factor;
     uint8_t bandwidth_index;
     uint8_t coding_rate;
+
+    /*
+     * Managed TX policy. One telemetry snapshot is copied into RadioTxService
+     * ownership before transmission, so the staging telemetry buffer can no
+     * longer be overwritten while the packet is in flight.
+     */
+    uint16_t tx_timeout_ms;
+    uint16_t retry_delay_ms;
+    uint8_t max_tx_attempts;
 } bolus_radio_config_t;
 
 typedef struct
