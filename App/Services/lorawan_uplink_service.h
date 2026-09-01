@@ -7,6 +7,11 @@
 #include "bolus_runtime_config.h"
 #include "LoRaMac.h"
 
+/*
+ * [UNTESTED] LoRaWAN network integration staging.
+ * No clean-build/hardware/network validation is implied by this header.
+ */
+
 typedef enum
 {
     LORAWAN_UPLINK_STATE_UNINITIALIZED = 0,
@@ -69,8 +74,15 @@ typedef struct
     LoRaMacEventInfoStatus_t last_mcps_confirm_status;
     LoRaMacEventInfoStatus_t last_join_confirm_status;
 
-    /* RX1/RX2 observations only. Downlink command decode/apply is a later stage. */
+    /* RX1/RX2 observations plus staged [UNTESTED] command routing. */
     uint32_t downlink_count;
+    uint32_t downlink_command_count;
+    uint32_t downlink_wrong_port_count;
+    uint32_t downlink_response_queued_count;
+    uint32_t downlink_response_tx_success_count;
+    uint32_t downlink_response_tx_failure_count;
+    uint32_t downlink_response_drop_count;
+
     uint32_t last_downlink_counter;
     uint8_t last_downlink_port;
     uint8_t last_downlink_size;
@@ -81,8 +93,13 @@ typedef struct
 
 extern lorawan_uplink_diag_t lorawan_uplink_service_diag;
 
+/*
+ * RuntimeConfig is intentionally mutable because accepted downlink commands are
+ * atomically committed into this RAM object. Cached services still expose a
+ * pending-apply mask and are NOT claimed as live-reconfigured yet.
+ */
 lorawan_uplink_status_t LoRaWanUplinkService_Init(
-    const bolus_runtime_config_t *config);
+    bolus_runtime_config_t *config);
 
 lorawan_uplink_status_t LoRaWanUplinkService_Submit(
     const uint8_t *payload,
