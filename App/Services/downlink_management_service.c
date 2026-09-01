@@ -1,17 +1,8 @@
 #include "downlink_management_service.h"
 
-#include "fault_manager.h"
-
 #include <string.h>
 
-/*
- * ============================================================
- * [UNTESTED] DOWNLINK MANAGEMENT STAGING IMPLEMENTATION
- * ============================================================
- * No clean-build, gateway, RX1/RX2, or hardware apply validation has been
- * recorded for this module yet. See docs/phase5_lorawan_downlink_staging.md.
- */
-
+/* [UNTESTED] No clean-build, gateway, RX1/RX2 or live-apply validation yet. */
 #define DOWNLINK_HEADER_SIZE  4U
 
 static bolus_runtime_config_t *s_runtime_config = NULL;
@@ -23,8 +14,7 @@ downlink_management_diag_t downlink_management_diag = {0};
 
 static uint16_t ReadU16Le(const uint8_t *value)
 {
-    return (uint16_t)((uint16_t)value[0] |
-                      ((uint16_t)value[1] << 8));
+    return (uint16_t)((uint16_t)value[0] | ((uint16_t)value[1] << 8));
 }
 
 static uint32_t ReadU32Le(const uint8_t *value)
@@ -44,11 +34,6 @@ static void BuildResponse(
 {
     uint16_t config_version = 0U;
 
-    if ((response == NULL) || (response_size == NULL))
-    {
-        return;
-    }
-
     if (s_runtime_config != NULL)
     {
         config_version = s_runtime_config->version;
@@ -65,29 +50,19 @@ static void BuildResponse(
     *response_size = DOWNLINK_MANAGEMENT_RESPONSE_SIZE;
 }
 
-static downlink_result_t ApplyCommandToCandidate(
+static downlink_result_t ApplyCommand(
     uint8_t command_id,
     const uint8_t *value,
     uint8_t length,
     bolus_runtime_config_t *candidate,
     downlink_apply_mask_t *apply_mask)
 {
-    if ((value == NULL) || (candidate == NULL) || (apply_mask == NULL))
-    {
-        return DOWNLINK_RESULT_ERROR_PARAM;
-    }
-
     switch ((downlink_command_id_t)command_id)
     {
         case DOWNLINK_CMD_SET_BMA_EVENT_SENSITIVITY:
-            if (length != 1U)
-            {
-                return DOWNLINK_RESULT_ERROR_LENGTH;
-            }
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
             if (value[0] > (uint8_t)BOLUS_BMA_EVENT_SENSITIVITY_OFF)
-            {
                 return DOWNLINK_RESULT_ERROR_VALUE;
-            }
             candidate->event_processing.bma_event_sensitivity_level =
                 (bolus_bma_event_sensitivity_t)value[0];
             if (candidate->event_processing.bma_event_sensitivity_level !=
@@ -101,89 +76,53 @@ static downlink_result_t ApplyCommandToCandidate(
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_BMA_STEP_SENSITIVITY:
-            if (length != 1U)
-            {
-                return DOWNLINK_RESULT_ERROR_LENGTH;
-            }
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
             if (value[0] > (uint8_t)BOLUS_BMA_STEP_SENSITIVITY_LEVEL_7)
-            {
                 return DOWNLINK_RESULT_ERROR_VALUE;
-            }
             candidate->bma.step_sensitivity =
                 (bolus_bma_step_sensitivity_t)value[0];
             *apply_mask |= DOWNLINK_APPLY_BMA_SENSOR;
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_EPISODE_RETRIGGER_GUARD_MS:
-            if (length != 2U)
-            {
-                return DOWNLINK_RESULT_ERROR_LENGTH;
-            }
-            candidate->event_processing.episode_retrigger_guard_ms =
-                ReadU16Le(value);
+            if (length != 2U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            candidate->event_processing.episode_retrigger_guard_ms = ReadU16Le(value);
             *apply_mask |= DOWNLINK_APPLY_EVENT_EPISODE;
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_EPISODE_QUIET_TIMEOUT_S:
-            if (length != 2U)
-            {
-                return DOWNLINK_RESULT_ERROR_LENGTH;
-            }
-            candidate->event_processing.episode_quiet_timeout_s =
-                ReadU16Le(value);
+            if (length != 2U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            candidate->event_processing.episode_quiet_timeout_s = ReadU16Le(value);
             *apply_mask |= DOWNLINK_APPLY_EVENT_EPISODE;
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_TMP_SAMPLE_PERIOD_S:
-            if (length != 4U)
-            {
-                return DOWNLINK_RESULT_ERROR_LENGTH;
-            }
+            if (length != 4U) return DOWNLINK_RESULT_ERROR_LENGTH;
             candidate->temperature.sample_period_s = ReadU32Le(value);
-            /* main.c reads this field live; no cached service re-init is required. */
             return DOWNLINK_RESULT_ACCEPTED_NO_LIVE_RECONFIG;
 
         case DOWNLINK_CMD_SET_MPU_BURST_DURATION_MS:
-            if (length != 2U)
-            {
-                return DOWNLINK_RESULT_ERROR_LENGTH;
-            }
+            if (length != 2U) return DOWNLINK_RESULT_ERROR_LENGTH;
             candidate->mpu.burst_duration_ms = ReadU16Le(value);
             *apply_mask |= DOWNLINK_APPLY_MPU_SENSOR;
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_UPLINK_PERIOD_S:
-            if (length != 4U)
-            {
-                return DOWNLINK_RESULT_ERROR_LENGTH;
-            }
+            if (length != 4U) return DOWNLINK_RESULT_ERROR_LENGTH;
             candidate->radio.uplink_period_s = ReadU32Le(value);
             *apply_mask |= DOWNLINK_APPLY_TELEMETRY_WINDOW;
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_EVENT_ENABLE:
-            if (length != 1U)
-            {
-                return DOWNLINK_RESULT_ERROR_LENGTH;
-            }
-            if (value[0] > 1U)
-            {
-                return DOWNLINK_RESULT_ERROR_VALUE;
-            }
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            if (value[0] > 1U) return DOWNLINK_RESULT_ERROR_VALUE;
             candidate->event_processing.enable = (value[0] != 0U);
-            *apply_mask |=
-                (DOWNLINK_APPLY_BMA_EVENT | DOWNLINK_APPLY_EVENT_EPISODE);
+            *apply_mask |= DOWNLINK_APPLY_BMA_EVENT | DOWNLINK_APPLY_EVENT_EPISODE;
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_MPU_EVENT_TRIGGER_ENABLE:
-            if (length != 1U)
-            {
-                return DOWNLINK_RESULT_ERROR_LENGTH;
-            }
-            if (value[0] > 1U)
-            {
-                return DOWNLINK_RESULT_ERROR_VALUE;
-            }
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            if (value[0] > 1U) return DOWNLINK_RESULT_ERROR_VALUE;
             candidate->mpu.event_trigger_enable = (value[0] != 0U);
             *apply_mask |= DOWNLINK_APPLY_MPU_SENSOR;
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
@@ -200,11 +139,9 @@ bool DownlinkManagementService_Init(bolus_runtime_config_t *runtime_config)
     s_initialized = false;
     s_last_accepted_transaction_valid = false;
     s_last_accepted_transaction_id = 0U;
-
     downlink_management_diag.validation_state = DOWNLINK_VALIDATION_UNTESTED;
 
-    if ((runtime_config == NULL) ||
-        !BolusRuntimeConfig_Validate(runtime_config))
+    if ((runtime_config == NULL) || !BolusRuntimeConfig_Validate(runtime_config))
     {
         downlink_management_diag.last_result = DOWNLINK_RESULT_ERROR_PARAM;
         return false;
@@ -213,9 +150,7 @@ bool DownlinkManagementService_Init(bolus_runtime_config_t *runtime_config)
     s_runtime_config = runtime_config;
     s_initialized = true;
     downlink_management_diag.initialized = true;
-    downlink_management_diag.last_result =
-        DOWNLINK_RESULT_ACCEPTED_NO_LIVE_RECONFIG;
-
+    downlink_management_diag.last_result = DOWNLINK_RESULT_ACCEPTED_NO_LIVE_RECONFIG;
     return true;
 }
 
@@ -231,57 +166,36 @@ downlink_result_t DownlinkManagementService_HandleFrame(
     downlink_result_t result = DOWNLINK_RESULT_ERROR_PARAM;
     uint8_t transaction_id = 0U;
     uint8_t command_count = 0U;
-    uint8_t command_index;
     uint8_t offset = DOWNLINK_HEADER_SIZE;
-    bool changed;
+    uint8_t command_index;
 
-    if (response_size != NULL)
-    {
-        *response_size = 0U;
-    }
+    if (response_size != NULL) *response_size = 0U;
 
     if ((response == NULL) || (response_size == NULL) ||
         (response_capacity < DOWNLINK_MANAGEMENT_RESPONSE_SIZE))
-    {
         return DOWNLINK_RESULT_ERROR_PARAM;
-    }
 
     if (!s_initialized || (s_runtime_config == NULL))
     {
-        BuildResponse(
-            transaction_id,
-            DOWNLINK_RESULT_ERROR_NOT_INITIALIZED,
-            DOWNLINK_APPLY_NONE,
-            response,
-            response_size);
+        BuildResponse(0U, DOWNLINK_RESULT_ERROR_NOT_INITIALIZED,
+                      DOWNLINK_APPLY_NONE, response, response_size);
         return DOWNLINK_RESULT_ERROR_NOT_INITIALIZED;
     }
 
     downlink_management_diag.rx_frame_count++;
 
-    if (payload == NULL)
-    {
-        result = DOWNLINK_RESULT_ERROR_PARAM;
-        goto reject;
-    }
-
-    if (size >= 3U)
-    {
-        transaction_id = payload[2];
-    }
-
+    if (payload == NULL) goto reject;
+    if (size >= 3U) transaction_id = payload[2];
     if (size < DOWNLINK_HEADER_SIZE)
     {
         result = DOWNLINK_RESULT_ERROR_LENGTH;
         goto reject;
     }
-
     if (payload[0] != DOWNLINK_MANAGEMENT_REQUEST_MAGIC)
     {
         result = DOWNLINK_RESULT_ERROR_MAGIC;
         goto reject;
     }
-
     if (payload[1] != DOWNLINK_MANAGEMENT_PROTOCOL_VERSION)
     {
         result = DOWNLINK_RESULT_ERROR_VERSION;
@@ -297,16 +211,10 @@ downlink_result_t DownlinkManagementService_HandleFrame(
         downlink_management_diag.last_transaction_id = transaction_id;
         downlink_management_diag.last_transaction_valid = true;
         downlink_management_diag.last_command_count = command_count;
-        downlink_management_diag.last_result =
-            DOWNLINK_RESULT_DUPLICATE_TRANSACTION;
         downlink_management_diag.last_apply_mask = DOWNLINK_APPLY_NONE;
-
-        BuildResponse(
-            transaction_id,
-            DOWNLINK_RESULT_DUPLICATE_TRANSACTION,
-            DOWNLINK_APPLY_NONE,
-            response,
-            response_size);
+        downlink_management_diag.last_result = DOWNLINK_RESULT_DUPLICATE_TRANSACTION;
+        BuildResponse(transaction_id, DOWNLINK_RESULT_DUPLICATE_TRANSACTION,
+                      DOWNLINK_APPLY_NONE, response, response_size);
         return DOWNLINK_RESULT_DUPLICATE_TRANSACTION;
     }
 
@@ -325,7 +233,6 @@ downlink_result_t DownlinkManagementService_HandleFrame(
 
         command_id = payload[offset++];
         length = payload[offset++];
-
         downlink_management_diag.last_command_id = command_id;
 
         if ((uint16_t)offset + length > size)
@@ -334,18 +241,11 @@ downlink_result_t DownlinkManagementService_HandleFrame(
             goto reject;
         }
 
-        result = ApplyCommandToCandidate(
-            command_id,
-            &payload[offset],
-            length,
-            &candidate,
-            &apply_mask);
-
+        result = ApplyCommand(command_id, &payload[offset], length,
+                              &candidate, &apply_mask);
         if ((result != DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY) &&
             (result != DOWNLINK_RESULT_ACCEPTED_NO_LIVE_RECONFIG))
-        {
             goto reject;
-        }
 
         offset = (uint8_t)(offset + length);
     }
@@ -362,18 +262,9 @@ downlink_result_t DownlinkManagementService_HandleFrame(
         goto reject;
     }
 
-    changed = (memcmp(&candidate, s_runtime_config, sizeof(candidate)) != 0);
-
-    if (changed)
+    if (memcmp(&candidate, s_runtime_config, sizeof(candidate)) != 0)
     {
-        /*
-         * Atomic at application-structure level: only a fully parsed and fully
-         * validated candidate replaces the live RAM RuntimeConfig.
-         *
-         * IMPORTANT [UNTESTED]: modules with cached configuration are NOT yet
-         * reconfigured here. Their required activation is represented by
-         * pending_apply_mask and must not be treated as complete.
-         */
+        /* Atomic RAM commit only. Cached service activation is still pending. */
         *s_runtime_config = candidate;
         downlink_management_diag.ram_config_commit_count++;
     }
@@ -388,24 +279,11 @@ downlink_result_t DownlinkManagementService_HandleFrame(
     s_last_accepted_transaction_valid = true;
     s_last_accepted_transaction_id = transaction_id;
 
-    if (apply_mask != DOWNLINK_APPLY_NONE)
-    {
-        result = DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
-    }
-    else
-    {
-        result = DOWNLINK_RESULT_ACCEPTED_NO_LIVE_RECONFIG;
-    }
-
+    result = (apply_mask != DOWNLINK_APPLY_NONE) ?
+        DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY :
+        DOWNLINK_RESULT_ACCEPTED_NO_LIVE_RECONFIG;
     downlink_management_diag.last_result = result;
-
-    BuildResponse(
-        transaction_id,
-        result,
-        apply_mask,
-        response,
-        response_size);
-
+    BuildResponse(transaction_id, result, apply_mask, response, response_size);
     return result;
 
 reject:
@@ -413,18 +291,12 @@ reject:
     downlink_management_diag.last_transaction_id = transaction_id;
     downlink_management_diag.last_transaction_valid = (size >= 3U);
     downlink_management_diag.last_command_count = command_count;
-    downlink_management_diag.last_result = result;
     downlink_management_diag.last_apply_mask = DOWNLINK_APPLY_NONE;
+    downlink_management_diag.last_result = result;
 
-    FaultManager_Raise(BOLUS_FAULT_CONFIG_INVALID);
-
-    BuildResponse(
-        transaction_id,
-        result,
-        DOWNLINK_APPLY_NONE,
-        response,
-        response_size);
-
+    /* A rejected frame is a protocol/input error, not a local device fault. */
+    BuildResponse(transaction_id, result, DOWNLINK_APPLY_NONE,
+                  response, response_size);
     return result;
 }
 
@@ -438,27 +310,17 @@ void DownlinkManagementService_MarkApplyResult(
     bool success)
 {
     attempted_mask &= downlink_management_diag.pending_apply_mask;
-
-    if (attempted_mask == DOWNLINK_APPLY_NONE)
-    {
-        return;
-    }
+    if (attempted_mask == DOWNLINK_APPLY_NONE) return;
 
     if (success)
     {
         downlink_management_diag.pending_apply_mask &=
             (downlink_apply_mask_t)(~attempted_mask);
         downlink_management_diag.apply_complete_count++;
-
-        if (downlink_management_diag.pending_apply_mask == DOWNLINK_APPLY_NONE)
-        {
-            (void)FaultManager_ClearFault(BOLUS_FAULT_CONFIG_INVALID);
-        }
     }
     else
     {
         downlink_management_diag.apply_failure_count++;
-        FaultManager_Raise(BOLUS_FAULT_CONFIG_INVALID);
     }
 }
 
