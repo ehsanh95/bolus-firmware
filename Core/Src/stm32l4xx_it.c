@@ -17,9 +17,52 @@
   */
 /* USER CODE END Header */
 
+/* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "stm32l4xx_it.h"
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+/* USER CODE END Includes */
 
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN TD */
+
+/* USER CODE END TD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+/* USER CODE BEGIN PV */
+
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
+/* USER CODE BEGIN PFP */
+
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+
+/* USER CODE END 0 */
+
+/* External variables --------------------------------------------------------*/
+
+/* USER CODE BEGIN EV */
+
+/* USER CODE END EV */
+
+/******************************************************************************/
+/*           Cortex-M4 Processor Interruption and Exception Handlers          */
+/******************************************************************************/
 void NMI_Handler(void)
 {
   while (1)
@@ -72,13 +115,18 @@ void SysTick_Handler(void)
   HAL_IncTick();
 }
 
+/******************************************************************************/
+/* STM32L4xx Peripheral Interrupt Handlers                                    */
+/******************************************************************************/
+
+/* USER CODE BEGIN 1 */
 /*
  * RFM95W DIO0 is PA10 -> EXTI line 10.
- * HAL_GPIO_EXTI_IRQHandler clears the pending bit and calls
- * HAL_GPIO_EXTI_Callback(). The Bolus board layer callback only records a
- * pending DIO flag; no SX1276 SPI work is performed in this ISR.
+ * The HAL callback records only a pending flag; SX1276 register handling is
+ * deferred to RadioTxService_Process() in main context.
  */
 void EXTI15_10_IRQHandler(void)
 {
     HAL_GPIO_EXTI_IRQHandler(RFM_DIO0_Pin);
 }
+/* USER CODE END 1 */
