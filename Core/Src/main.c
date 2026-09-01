@@ -30,6 +30,7 @@
 #include "event_episode_service.h"
 #include "telemetry_window_service.h"
 #include "telemetry_codec.h"
+#include "radio_tx_service.h"
 #include "bma_irq_diag.h"
 #include "bolus_runtime_config.h"
 #include "rfm95w_board.h"
@@ -81,6 +82,12 @@ bool rfm95w_sleep_ok = false;
 bool rfm95w_stby_ok = false;
 bool rfm95w_freq_ok = false;
 bool rfm95w_final_ok = false;
+
+/* Managed raw-LoRa TX staging. */
+radio_tx_service_status_t radio_tx_service_init_status = RADIO_TX_SERVICE_ERROR_NOT_READY;
+radio_tx_service_status_t radio_tx_service_submit_status = RADIO_TX_SERVICE_ERROR_NOT_READY;
+bool radio_tx_service_ready = false;
+uint32_t telemetry_payload_v2_queued_count = 0U;
 
 /* BMA456 raw SPI Phase 4 regression diagnostics. */
 uint8_t bma456_first_read = 0U;
@@ -147,7 +154,7 @@ uint16_t event_episode_last_mpu_sample_count = 0U;
 uint16_t event_episode_last_mpu_peak_gyro_dps = 0U;
 uint16_t event_episode_last_mpu_orientation_change_cdeg = 0U;
 
-/* 15-minute telemetry staging. No RF transmission is connected yet. */
+/* 15-minute telemetry snapshot and encoding diagnostics. */
 telemetry_window_service_t telemetry_window_service = {0};
 telemetry_window_status_t telemetry_window_status = TELEMETRY_WINDOW_ERROR_CONFIG;
 bolus_telemetry_summary_v2_t telemetry_frozen_summary_v2 = {0};
@@ -234,11 +241,6 @@ static void HandleEventEpisodeAction(const event_episode_action_t *action)
         }
     }
 
-    /*
-     * UNTESTED STAGING (2026-08-30): temperature and MPU acquisitions are
-     * independent. A TMP failure must not prevent the MPU burst from running,
-     * and an MPU failure must not discard a successful TMP result.
-     */
     if (action->take_temperature_now)
     {
         if (!tmp_service_ready)
@@ -404,7 +406,6 @@ int main(void)
       BolusLed_Off(BOLUS_LED_SENSOR);
   }
 
-  /* Keep the known-good Phase 4 BMA raw SPI sanity check during migration. */
   BolusPower_On(BOLUS_POWER_BMA456);
   HAL_Delay(10U);
   HAL_GPIO_WritePin(Pedo_NSS_GPIO_Port, Pedo_NSS_Pin, GPIO_PIN_SET);
@@ -421,10 +422,6 @@ int main(void)
 
   BolusRuntimeConfig_LoadDefaults(&sensor_service_config);
 
-  /*
-   * UNTESTED STAGING: Event Episode lifecycle was implemented while hardware
-   * was unavailable. It must not be marked Phase-5 PASS until later bench tests.
-   */
   event_episode_service_status =
       EventEpisodeService_Init(&event_episode_service, &sensor_service_config);
   event_episode_ready = (event_episode_service_status == EVENT_EPISODE_OK);
@@ -436,7 +433,6 @@ int main(void)
           HAL_GetTick());
   telemetry_window_ready = (telemetry_window_status == TELEMETRY_WINDOW_OK);
 
-  /* BMA456: continuous low-power sentinel. */
   bma456_service_init_status = SensorService_InitBma(&hspi2, &sensor_service_config);
   bma456_service_ready =
       ((bma456_service_init_status == SENSOR_SERVICE_OK) && SensorService_IsBmaReady());
@@ -452,7 +448,6 @@ int main(void)
            BmaEventService_IsReady());
   }
 
-  /* TMP117: one-shot temperature path, shutdown between samples. */
   tmp_service_init_status = SensorService_InitTemperature(&hi2c3, &sensor_service_config);
   tmp_service_ready =
       ((tmp_service_init_status == SENSOR_SERVICE_OK) && SensorService_IsTemperatureReady());
@@ -469,12 +464,6 @@ int main(void)
       }
   }
 
-  /*
-   * MPU6050 Version-10 staged path: normally rail-OFF. Init still performs the
-   * known single-sample regression check, but each accepted Event Episode pulse
-   * now also requests a 250 ms (default) compact feature burst. Both the prior
-   * Episode logic and this new burst integration are UNTESTED on hardware.
-   */
   mpu_service_init_status = SensorService_InitMpu(&hi2c1, &sensor_service_config);
   mpu_service_ready =
       ((mpu_service_init_status == SENSOR_SERVICE_OK) && SensorService_IsMpuReady());
@@ -484,11 +473,15 @@ int main(void)
       mpu_service_last_read_tick = HAL_GetTick();
   }
 
-  /* RFM95W / SX1276 Phase 4 regression test. No RF transmission. */
+  /*
+   * RFM95W Phase-4 regression remains intact. Attach managed TX callbacks before
+   * SX1276Init so the driver retains TxDone/TxTimeout function pointers.
+   */
   BolusPower_On(BOLUS_POWER_RFM95W);
   HAL_Delay(RFM95W_POWERUP_DELAY_MS);
   Sx_Board_Bus_Init();
   Sx_Board_IoInit();
+  RadioTxService_AttachEvents(&rfm95w_radio_events);
   HAL_IWDG_Refresh(&hiwdg);
   rfm95w_wakeup_time_ms = SX1276Init(&rfm95w_radio_events);
   HAL_IWDG_Refresh(&hiwdg);
@@ -529,6 +522,11 @@ int main(void)
       (rfm95w_init_ok && rfm95w_sleep_ok && rfm95w_stby_ok && rfm95w_freq_ok &&
        (rfm95w_final_spi_status == HAL_OK));
   SX1276SetSleep();
+
+  radio_tx_service_init_status = RadioTxService_Init(&sensor_service_config);
+  radio_tx_service_ready =
+      ((radio_tx_service_init_status == RADIO_TX_SERVICE_OK) &&
+       RadioTxService_IsReady());
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -542,11 +540,12 @@ int main(void)
 
     TimerProcess();
 
-    /*
-     * Consume BMA INT1 edges in normal main context. The EXTI ISR only counts
-     * edges; the SPI status read happens here. Bundled BMA cooldown is zero;
-     * EventEpisodeService owns the 2 s retrigger guard and 120 s quiet timeout.
-     */
+    /* Process deferred radio DIO and timeout state in cooperative main context. */
+    if (radio_tx_service_ready)
+    {
+        RadioTxService_Process(now_ms);
+    }
+
     if (bma_event_service_ready)
     {
         uint32_t irq_count_snapshot = bma_irq_diag_count;
@@ -583,11 +582,6 @@ int main(void)
         }
     }
 
-    /*
-     * Non-blocking episode scheduler. Today now_ms is HAL_GetTick() because
-     * STOP2 migration is not complete. Production will pass an RTC/LPTIM-backed
-     * monotonic timebase. This path is explicitly UNTESTED until hardware returns.
-     */
     if (event_episode_ready)
     {
         event_episode_service_status =
@@ -609,7 +603,6 @@ int main(void)
         bma456_service_read_status = SensorService_ReadBmaSample(&bma456_service_sample);
     }
 
-    /* Background temperature baseline follows RuntimeConfig (600 s default). */
     if (tmp_service_ready &&
         ((HAL_GetTick() - tmp_service_last_read_tick) >=
          (sensor_service_config.temperature.sample_period_s * 1000UL)))
@@ -626,10 +619,9 @@ int main(void)
     }
 
     /*
-     * PREPARE ONLY: at each 15-minute boundary perform the final acquisitions,
-     * freeze the window and encode a 32-byte V2 packet. No SX1276 TX is called
-     * yet. The frozen summary/payload are visible in Live Expressions and may be
-     * overwritten by the next window until the radio pending/retry queue is added.
+     * At every 15-minute boundary take the final measurements, freeze the
+     * window and encode Telemetry V2. Unlike the previous staging version, the
+     * packet is then copied into RadioTxService-owned RAM before transmission.
      */
     if (telemetry_window_ready &&
         TelemetryWindow_IsDue(&telemetry_window_service, HAL_GetTick()))
@@ -716,7 +708,34 @@ int main(void)
         }
     }
 
-    /* MPU is otherwise physically OFF; only accepted pulses request a burst. */
+    /*
+     * Transfer ownership of a frozen/encoded packet to the TX service exactly
+     * once. If the TX service is busy, keep telemetry_payload_v2_ready=true and
+     * try again on a later loop; the source buffer is not modified meanwhile.
+     */
+    if (radio_tx_service_ready &&
+        telemetry_payload_v2_ready &&
+        (telemetry_payload_v2_size > 0U) &&
+        RadioTxService_CanAccept())
+    {
+        radio_tx_service_submit_status =
+            RadioTxService_Submit(
+                telemetry_payload_v2,
+                (uint8_t)telemetry_payload_v2_size,
+                telemetry_frozen_summary_v2.sequence);
+
+        if (radio_tx_service_submit_status == RADIO_TX_SERVICE_OK)
+        {
+            telemetry_payload_v2_ready = false;
+            telemetry_payload_v2_queued_count++;
+        }
+    }
+
+    /* Start a newly queued attempt without waiting for the next 10 ms loop. */
+    if (radio_tx_service_ready)
+    {
+        RadioTxService_Process(HAL_GetTick());
+    }
 
     HAL_IWDG_Refresh(&hiwdg);
     HAL_Delay(10U);
@@ -945,7 +964,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOB, Pedo_NSS_Pin|TMP_PWR_ON_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(GPIOC, Main_Reg_PWR_ON_Pin|LED1_Pin, GPIO_PIN_RESET);
 
-  /* Phase-5 sensor-event bring-up: BMA INT1 is the only active EXTI source. */
+  /* BMA INT1 remains isolated on EXTI9_5 by BmaIrqDiag. */
   GPIO_InitStruct.Pin = PEDO_INT1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -980,9 +999,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(BUTTON_GPIO_Port, &GPIO_InitStruct);
 
-  /* Radio DIOs stay readable inputs; their EXTI paths are not enabled yet. */
+  /*
+   * Managed TX requires only SX1276 DIO0 (TxDone). DIO1/DIO2 stay ordinary
+   * inputs until the receive/downlink stage so they cannot disturb BMA EXTI.
+   */
   GPIO_InitStruct.Pin = RFM_DIO0_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(RFM_DIO0_GPIO_Port, &GPIO_InitStruct);
 
@@ -990,6 +1012,9 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 6U, 0U);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 }
 
 /* USER CODE BEGIN 4 */
