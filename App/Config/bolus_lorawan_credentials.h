@@ -26,8 +26,18 @@
     { 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, \
       0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U }
 
-/* Uplink policy. These are engineering defaults, not remotely configurable yet. */
+/*
+ * LoRaWAN application ports.
+ *
+ * [UNTESTED] The downlink/control-response ports are staged in firmware but
+ * have not yet been validated with a real OTAA session, gateway, or network
+ * server.
+ */
 #define BOLUS_LORAWAN_APP_PORT                 2U
+#define BOLUS_LORAWAN_DOWNLINK_PORT            3U
+#define BOLUS_LORAWAN_CONTROL_UPLINK_PORT      4U
+
+/* Uplink policy. These are engineering defaults and still require validation. */
 #define BOLUS_LORAWAN_ADR_ENABLE               1
 #define BOLUS_LORAWAN_CONFIRMED_UPLINK         0
 #define BOLUS_LORAWAN_CONFIRMED_TRIALS         3U
