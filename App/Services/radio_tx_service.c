@@ -11,6 +11,9 @@
  * LoRa staging milestone. Keep that contract while routing the packet through
  * LoRaMAC instead of calling SX1276Send() directly. This avoids changing the
  * validated telemetry ownership path while the network layer is introduced.
+ *
+ * [UNTESTED] The LoRaWAN uplink/downlink path behind this facade has not yet
+ * passed clean-build or network/hardware validation.
  */
 volatile radio_tx_service_diag_t radio_tx_service_diag = {0};
 
@@ -33,7 +36,7 @@ void RadioTxService_AttachEvents(RadioEvents_t *events)
 }
 
 radio_tx_service_status_t RadioTxService_Init(
-    const bolus_runtime_config_t *config)
+    bolus_runtime_config_t *config)
 {
     lorawan_uplink_status_t status;
 
