@@ -62,38 +62,32 @@ typedef struct
     uint32_t last_air_time_ms;
 } radio_tx_service_diag_t;
 
-/* Live Expressions-friendly staging diagnostics. */
+/* Backward-compatible debugger view for the earlier telemetry TX milestone. */
 extern volatile radio_tx_service_diag_t radio_tx_service_diag;
 
 /*
- * Must be called before SX1276Init()/Radio.Init() so the Semtech driver retains
- * our TxDone and TxTimeout callback pointers. Existing RX callbacks are left
- * untouched for the later downlink stage.
+ * Called by the existing Phase-4 bring-up path before its diagnostic
+ * SX1276Init(). The LoRaWAN implementation deliberately leaves this event set
+ * empty; LoRaMacInitialization() subsequently installs MAC-owned radio
+ * callbacks for uplink plus RX1/RX2.
  */
 void RadioTxService_AttachEvents(RadioEvents_t *events);
 
 /*
- * Initialize the TX policy after the Phase-4 radio bring-up/regression path has
- * initialized the SX1276 driver. The service owns packet lifetime/retry policy,
- * not radio power gating; RFM95W rail optimization remains a later power stage.
- *
- * IMPORTANT: this is raw LoRa PHY transport management only. It does NOT create
- * a LoRaWAN PHYPayload, join a network, or implement RX1/RX2 yet.
+ * Compatibility facade retained so main.c and the validated TelemetryWindow
+ * ownership handoff do not need to change. The implementation now initializes
+ * and drives the LoRaWAN uplink manager rather than raw LoRa PHY transmission.
  */
 radio_tx_service_status_t RadioTxService_Init(
     const bolus_runtime_config_t *config);
 
-/*
- * Copy one packet into service-owned RAM. A copied packet cannot be overwritten
- * by the next TelemetryWindow freeze while it is pending/in flight.
- */
+/* Copy a packet into the LoRaWAN service-owned two-slot queue. */
 radio_tx_service_status_t RadioTxService_Submit(
     const uint8_t *payload,
     uint8_t size,
     uint16_t sequence);
 
-/* Cooperative main-context processing: deferred radio DIO work, TxDone/timeout,
- * bounded retry and the next send attempt. Call after TimerProcess(). */
+/* Cooperative LoRaMAC processing. Call after TimerProcess(). */
 void RadioTxService_Process(uint32_t now_ms);
 
 bool RadioTxService_IsReady(void);
