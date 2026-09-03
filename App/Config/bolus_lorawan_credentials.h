@@ -2,20 +2,63 @@
 #define BOLUS_LORAWAN_CREDENTIALS_H
 
 /*
- * LoRaWAN OTAA credentials for Bolus.
+ * LoRaWAN credentials for Bolus.
  *
- * IMPORTANT:
- * - Do not commit production credentials to this public repository.
- * - Keep BOLUS_LORAWAN_CREDENTIALS_PROVISIONED at 0 until credentials are
- *   supplied through a private/local provisioning path.
- * - The zero values below are intentionally non-functional placeholders.
+ * TEST MODE:
+ * - ABP is prepared for laboratory validation of the complete uplink path.
+ * - Replace ONLY the placeholder values locally with TTN generated values.
+ * - Do not commit real production keys to this repository.
  *
- * LoRaWAN 1.0.x uses one 128-bit root key for OTAA. The integration writes the
- * same root key to both APP_KEY and NWK_KEY MIB entries because the imported
- * Semtech/ST secure-element API exposes the 1.1-style names as well.
+ * Production recommendation:
+ * - Use OTAA with secure provisioning and optional NVM session restore.
  */
+
+#define BOLUS_LORAWAN_ACTIVATION_ABP           1
 #define BOLUS_LORAWAN_CREDENTIALS_PROVISIONED  0
 
+/*
+ * =========================
+ * ABP TEST CREDENTIALS
+ * =========================
+ *
+ * TTN provides these values when an ABP device is created:
+ *
+ * DevAddr:
+ *   Example: 260B1234
+ *   Stored as 32-bit address.
+ *
+ * FNwkSIntKey:
+ *   Example format from TTN:
+ *   00112233445566778899AABBCCDDEEFF
+ *
+ * SNwkSIntKey:
+ *   Example format from TTN:
+ *   112233445566778899AABBCCDDEEFF00
+ *
+ * AppSKey:
+ *   Example format from TTN:
+ *   AABBCCDDEEFF00112233445566778899
+ *
+ * Replace these locally before flashing.
+ */
+
+#define BOLUS_LORAWAN_DEV_ADDR                  0x260B1234UL
+
+#define BOLUS_LORAWAN_F_NWK_S_INT_KEY_BYTES \
+    { 0x00U, 0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U, \
+      0x88U, 0x99U, 0xAAU, 0xBBU, 0xCCU, 0xDDU, 0xEEU, 0xFFU }
+
+#define BOLUS_LORAWAN_S_NWK_S_INT_KEY_BYTES \
+    { 0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U, 0x88U, \
+      0x99U, 0xAAU, 0xBBU, 0xCCU, 0xDDU, 0xEEU, 0xFFU, 0x00U }
+
+#define BOLUS_LORAWAN_APP_S_KEY_BYTES \
+    { 0xAAU, 0xBBU, 0xCCU, 0xDDU, 0xEEU, 0xFFU, 0x00U, 0x11U, \
+      0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U, 0x88U, 0x99U }
+
+/*
+ * OTAA placeholders remain available for future production provisioning.
+ */
 #define BOLUS_LORAWAN_DEV_EUI_BYTES \
     { 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U }
 
@@ -28,16 +71,12 @@
 
 /*
  * LoRaWAN application ports.
- *
- * [UNTESTED] The downlink/control-response ports are staged in firmware but
- * have not yet been validated with a real OTAA session, gateway, or network
- * server.
  */
 #define BOLUS_LORAWAN_APP_PORT                 2U
 #define BOLUS_LORAWAN_DOWNLINK_PORT            3U
 #define BOLUS_LORAWAN_CONTROL_UPLINK_PORT      4U
 
-/* Uplink policy. These are engineering defaults and still require validation. */
+/* Uplink policy. */
 #define BOLUS_LORAWAN_ADR_ENABLE               1
 #define BOLUS_LORAWAN_CONFIRMED_UPLINK         0
 #define BOLUS_LORAWAN_CONFIRMED_TRIALS         3U
