@@ -18,6 +18,10 @@
  * - Accepted commands update the application RuntimeConfig atomically in RAM.
  * - Services that cache configuration still require a later live-reconfigure
  *   step. pending_apply_mask makes that incomplete activation explicit.
+ * - RF fields added in this revision are command-decodable but are still
+ *   explicitly UNTESTED. Some are legacy/raw-radio policy fields and must not
+ *   be described as active LoRaWAN PHY settings until the MAC apply path is
+ *   implemented and validated.
  * - No production claim is allowed until the apply path is implemented and
  *   hardware/network tests are recorded.
  */
@@ -35,6 +39,7 @@ typedef uint16_t downlink_apply_mask_t;
 #define DOWNLINK_APPLY_EVENT_EPISODE         ((downlink_apply_mask_t)(1U << 2))
 #define DOWNLINK_APPLY_MPU_SENSOR            ((downlink_apply_mask_t)(1U << 3))
 #define DOWNLINK_APPLY_TELEMETRY_WINDOW      ((downlink_apply_mask_t)(1U << 4))
+#define DOWNLINK_APPLY_RADIO_POLICY          ((downlink_apply_mask_t)(1U << 5))
 
 /*
  * Request format (little-endian values):
@@ -58,7 +63,16 @@ typedef enum
     DOWNLINK_CMD_SET_MPU_BURST_DURATION_MS = 0x06,
     DOWNLINK_CMD_SET_UPLINK_PERIOD_S = 0x07,
     DOWNLINK_CMD_SET_EVENT_ENABLE = 0x08,
-    DOWNLINK_CMD_SET_MPU_EVENT_TRIGGER_ENABLE = 0x09
+    DOWNLINK_CMD_SET_MPU_EVENT_TRIGGER_ENABLE = 0x09,
+
+    /* [UNTESTED] Runtime radio/RF policy commands. */
+    DOWNLINK_CMD_SET_RF_TX_POWER_DBM = 0x0A,
+    DOWNLINK_CMD_SET_RF_SPREADING_FACTOR = 0x0B,
+    DOWNLINK_CMD_SET_RF_BANDWIDTH_INDEX = 0x0C,
+    DOWNLINK_CMD_SET_RF_CODING_RATE = 0x0D,
+    DOWNLINK_CMD_SET_RF_TX_TIMEOUT_MS = 0x0E,
+    DOWNLINK_CMD_SET_RF_RETRY_DELAY_MS = 0x0F,
+    DOWNLINK_CMD_SET_RF_MAX_TX_ATTEMPTS = 0x10
 } downlink_command_id_t;
 
 typedef enum
