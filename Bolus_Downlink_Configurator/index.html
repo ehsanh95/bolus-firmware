@@ -5,90 +5,460 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bolus Payload Toolkit</title>
 <style>
-:root{font-family:Inter,Segoe UI,Tahoma,sans-serif;color-scheme:light;--ink:#17202a;--muted:#64717d;--line:#dce2e8;--soft:#f4f6f8;--accent:#1f4f7a;--accent2:#e8f1fb;--ok:#1b5e20;--okbg:#e8f5e9;--err:#8e2430;--errbg:#ffebee;--warn:#6b5200;--warnbg:#fff3cd}*{box-sizing:border-box}body{margin:0;background:#f3f5f7;color:var(--ink)}main{max-width:1180px;margin:0 auto;padding:28px 22px 40px}.hero{background:linear-gradient(135deg,#172b3d,#254f70);color:white;padding:24px;border-radius:16px;box-shadow:0 8px 24px #13293d1f}.hero h1{margin:0 0 7px;font-size:30px}.hero p{margin:0;color:#dbe8f2}.muted{color:var(--muted)}.banner{background:var(--warnbg);border:1px solid #e5c459;padding:12px 14px;border-radius:10px;margin:16px 0;color:#493b07}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}.card{background:white;border:1px solid var(--line);border-radius:13px;padding:17px;box-shadow:0 1px 3px #0000000b}.card h2{font-size:19px;margin:0 0 12px}.card h3{font-size:15px;margin:14px 0 8px}.row{display:grid;grid-template-columns:28px 1fr minmax(115px,165px);gap:9px;align-items:center;padding:9px 0;border-top:1px solid #eef1f4}.row:first-of-type{border-top:0}input,select,button,textarea{font:inherit}input[type=number],select,textarea{width:100%;padding:8px;border:1px solid #cfd7df;border-radius:8px;background:white;color:var(--ink)}input:disabled,select:disabled{background:#f1f3f5;color:#89939d}label small{display:block;color:#6c7781;margin-top:3px;line-height:1.35}.controls{display:flex;gap:9px;flex-wrap:wrap;align-items:end}.controls>label{min-width:160px}button{border:0;border-radius:8px;padding:9px 13px;cursor:pointer;background:#243b53;color:white}button.secondary{background:#e9eef3;color:#243b53}button.ghost{background:transparent;color:#244d73;border:1px solid #bdd0df}button:disabled{opacity:.5;cursor:not-allowed}.output{direction:ltr;text-align:left;font-family:Consolas,Menlo,monospace;min-height:68px;resize:vertical}.json{min-height:300px}.status{padding:10px;border-radius:8px;margin-top:10px;white-space:pre-wrap}.ok{background:var(--okbg);color:var(--ok)}.err{background:var(--errbg);color:var(--err)}.info{background:var(--accent2);color:#244d73}.badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;background:#eef2f5;margin-left:6px}.port{font-family:Consolas,monospace;font-weight:700}.divider{height:1px;background:#e7ebef;margin:18px 0}.tool-head{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.tool-head p{margin:4px 0 0}.protocol-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}.protocol-table th,.protocol-table td{border-bottom:1px solid #e8ecef;padding:7px;text-align:left}.protocol-table th{background:#f6f8fa}code{font-family:Consolas,monospace;background:#f2f4f6;padding:2px 5px;border-radius:5px}footer{margin-top:20px;color:#68737d;font-size:13px;line-height:1.5}@media(max-width:680px){main{padding:16px 12px}.hero{padding:18px}.hero h1{font-size:25px}.row{grid-template-columns:26px 1fr}.row>*:last-child{grid-column:2}}
+:root{
+  font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  color-scheme:light;
+  --bg:#f3f6fa;
+  --surface:#ffffff;
+  --surface-soft:#f8fafc;
+  --ink:#17212b;
+  --muted:#667788;
+  --line:#dfe6ee;
+  --line-strong:#cfd9e4;
+  --navy:#17324d;
+  --navy-2:#244f74;
+  --blue:#2563a6;
+  --blue-soft:#eaf3fc;
+  --green:#217346;
+  --green-soft:#eaf7f0;
+  --red:#a0343f;
+  --red-soft:#fff0f2;
+  --amber:#7a5b08;
+  --amber-soft:#fff8dd;
+  --shadow:0 12px 36px rgba(31,50,71,.08);
+  --shadow-soft:0 2px 10px rgba(31,50,71,.06);
+  --radius:18px;
+  --radius-sm:12px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  min-height:100vh;
+  color:var(--ink);
+  background:
+    radial-gradient(circle at 10% 0%,rgba(37,99,166,.08),transparent 28rem),
+    radial-gradient(circle at 100% 10%,rgba(23,50,77,.06),transparent 34rem),
+    var(--bg);
+}
+button,input,select,textarea{font:inherit}
+button,input,select,textarea{outline:none}
+main{max-width:1240px;margin:0 auto;padding:34px 22px 52px}
+
+.hero{
+  position:relative;
+  overflow:hidden;
+  padding:30px 30px 26px;
+  border-radius:24px;
+  color:white;
+  background:linear-gradient(135deg,#142b42 0%,#1f4869 58%,#2c648d 100%);
+  box-shadow:0 18px 50px rgba(20,43,66,.18);
+}
+.hero::after{
+  content:"";
+  position:absolute;
+  width:260px;
+  height:260px;
+  right:-80px;
+  top:-115px;
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:50%;
+  box-shadow:0 0 0 36px rgba(255,255,255,.035),0 0 0 76px rgba(255,255,255,.025);
+  pointer-events:none;
+}
+.eyebrow{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  margin-bottom:12px;
+  color:#d6e8f6;
+  font-size:12px;
+  font-weight:800;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.eyebrow::before{content:"";width:8px;height:8px;border-radius:50%;background:#8fd1ff;box-shadow:0 0 0 5px rgba(143,209,255,.12)}
+.hero h1{margin:0;font-size:clamp(30px,4vw,44px);line-height:1.05;letter-spacing:-.035em}
+.hero p{max-width:720px;margin:10px 0 0;color:#d8e7f2;font-size:15px;line-height:1.65}
+.port-strip{display:flex;gap:9px;flex-wrap:wrap;margin-top:22px}
+.port-chip{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height:38px;
+  padding:7px 11px;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:999px;
+  background:rgba(255,255,255,.08);
+  backdrop-filter:blur(8px);
+  color:#eef7ff;
+  font-size:12px;
+}
+.port-chip strong{font-family:Consolas,Menlo,monospace;color:white;font-size:12px}
+
+.notice{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:12px;
+  align-items:flex-start;
+  margin:16px 0 22px;
+  padding:14px 16px;
+  border:1px solid #ead88f;
+  border-radius:14px;
+  background:var(--amber-soft);
+  color:#5d490d;
+  box-shadow:var(--shadow-soft);
+  font-size:13px;
+  line-height:1.55;
+}
+.notice-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:9px;background:#f4e5a4;font-weight:900}
+.notice strong{color:#443406}
+
+.workspace{display:grid;gap:22px}
+.panel{
+  overflow:hidden;
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  background:var(--surface);
+  box-shadow:var(--shadow);
+}
+.panel-head{
+  display:flex;
+  justify-content:space-between;
+  gap:18px;
+  align-items:flex-start;
+  padding:22px 24px 18px;
+  border-bottom:1px solid #edf1f5;
+  background:linear-gradient(180deg,#ffffff,#fbfcfe);
+}
+.panel-title{display:flex;gap:13px;align-items:flex-start}
+.step{
+  flex:0 0 auto;
+  display:grid;
+  place-items:center;
+  width:34px;
+  height:34px;
+  border-radius:11px;
+  background:var(--navy);
+  color:white;
+  font-weight:800;
+  box-shadow:0 5px 12px rgba(23,50,77,.16);
+}
+.panel h2{margin:1px 0 5px;font-size:21px;letter-spacing:-.02em}
+.panel-head p{margin:0;color:var(--muted);font-size:13px;line-height:1.55}
+.panel-body{padding:22px 24px 24px}
+
+.top-controls{
+  display:flex;
+  align-items:flex-end;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:18px;
+  padding:14px;
+  border:1px solid #e7edf3;
+  border-radius:14px;
+  background:var(--surface-soft);
+}
+.top-controls .spacer{flex:1}
+.send-pill{align-self:center;padding:8px 11px;border-radius:999px;background:var(--blue-soft);color:#26557e;font-size:12px;font-weight:700}
+
+label{display:block;font-size:12px;font-weight:700;color:#405164}
+label small{display:block;margin-top:4px;color:#7a8998;font-size:11px;font-weight:500;line-height:1.4}
+input[type=number],select,textarea{
+  width:100%;
+  margin-top:6px;
+  padding:9px 10px;
+  border:1px solid var(--line-strong);
+  border-radius:10px;
+  background:#fff;
+  color:var(--ink);
+  transition:border-color .15s,box-shadow .15s,background .15s;
+}
+input[type=number]:focus,select:focus,textarea:focus{border-color:#7aa8d0;box-shadow:0 0 0 3px rgba(37,99,166,.10)}
+input:disabled,select:disabled{background:#f3f5f7;color:#98a4af;border-color:#e2e7ec}
+input[type=checkbox]{width:17px;height:17px;margin:0;accent-color:var(--blue);cursor:pointer}
+
+.config-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.subcard{
+  overflow:hidden;
+  border:1px solid var(--line);
+  border-radius:15px;
+  background:#fff;
+}
+.subcard-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  min-height:48px;
+  padding:12px 14px;
+  border-bottom:1px solid #edf1f4;
+  background:#fbfcfd;
+}
+.subcard-head h3{margin:0;font-size:14px;letter-spacing:-.01em}
+.subcard-tag{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#6f7e8d;background:#edf2f6;padding:5px 7px;border-radius:999px}
+.subcard-tag.warn{color:#765c0a;background:#fff3c4}
+.row{
+  display:grid;
+  grid-template-columns:28px minmax(0,1fr) minmax(118px,170px);
+  gap:10px;
+  align-items:center;
+  padding:11px 14px;
+  border-top:1px solid #f0f3f6;
+}
+.row:first-of-type{border-top:0}
+.row:hover{background:#fbfdff}
+.row label{font-size:12px}
+
+button{
+  min-height:38px;
+  border:1px solid transparent;
+  border-radius:10px;
+  padding:8px 13px;
+  cursor:pointer;
+  background:var(--navy);
+  color:white;
+  font-weight:700;
+  font-size:12px;
+  transition:transform .12s,box-shadow .12s,background .12s,border-color .12s;
+}
+button:hover{transform:translateY(-1px);box-shadow:0 5px 12px rgba(23,50,77,.12);background:#214667}
+button:active{transform:translateY(0)}
+button.secondary{background:#eef3f7;color:#30495f;border-color:#dde5ec}
+button.secondary:hover{background:#e5edf4}
+button.ghost{background:#fff;color:#315b7e;border-color:#cbdbe8}
+button.ghost:hover{background:#f4f9fd}
+button:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+
+.section-break{height:1px;margin:22px 0;background:#edf1f4}
+.output-head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin:0 0 12px}
+.output-head h3{margin:0;font-size:15px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.status{margin:12px 0 14px;padding:11px 12px;border-radius:11px;white-space:pre-wrap;font-size:12px;line-height:1.5;border:1px solid transparent}
+.ok{background:var(--green-soft);color:var(--green);border-color:#caead8}
+.err{background:var(--red-soft);color:var(--red);border-color:#f1d2d7}
+.info{background:var(--blue-soft);color:#27587f;border-color:#d7e8f7}
+
+.output-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.output-box{padding:12px;border:1px solid var(--line);border-radius:13px;background:var(--surface-soft)}
+.output-box .box-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:7px}
+.output-box .box-head span{font-size:11px;font-weight:800;color:#526376;text-transform:uppercase;letter-spacing:.04em}
+.output-box button{min-height:30px;padding:5px 9px;font-size:10px}
+.output{
+  direction:ltr;
+  text-align:left;
+  margin:0;
+  min-height:92px;
+  resize:vertical;
+  font-family:Consolas,Menlo,monospace;
+  font-size:12px;
+  line-height:1.55;
+  background:#fff;
+}
+
+.decoder-controls{display:grid;grid-template-columns:180px 180px 1fr;gap:10px;align-items:end;margin-bottom:14px}
+.test-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.decoder-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:stretch}
+.io-card{display:flex;flex-direction:column;min-width:0;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface-soft)}
+.io-card .io-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}
+.io-card .io-head strong{font-size:12px;color:#405164}
+.io-card .actions{margin-top:9px}
+.io-card textarea{flex:1;min-height:280px;margin:0;background:#fff}
+.json{min-height:280px}
+
+.details{margin-top:16px;border:1px solid var(--line);border-radius:13px;background:#fff;overflow:hidden}
+.details summary{cursor:pointer;padding:12px 14px;font-size:12px;font-weight:800;background:#f8fafc;color:#405164}
+.details[open] summary{border-bottom:1px solid var(--line)}
+.protocol-table{width:100%;border-collapse:collapse;font-size:12px}
+.protocol-table th,.protocol-table td{padding:9px 12px;border-bottom:1px solid #eef2f5;text-align:left;vertical-align:top}
+.protocol-table tr:last-child td{border-bottom:0}
+.protocol-table th{background:#fcfdfe;color:#526376;font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+.protocol-table td:first-child{width:92px;font-family:Consolas,monospace;color:#315b7e;font-weight:700}
+code{font-family:Consolas,Menlo,monospace;background:#edf2f6;padding:2px 5px;border-radius:5px;color:#31495e}
+
+footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.65}
+
+@media(max-width:920px){
+  .config-grid,.decoder-grid{grid-template-columns:1fr}
+  .output-grid{grid-template-columns:1fr}
+  .decoder-controls{grid-template-columns:1fr 1fr}
+  .test-actions{grid-column:1/-1;justify-content:flex-start}
+}
+@media(max-width:680px){
+  main{padding:16px 11px 34px}
+  .hero{padding:23px 18px 20px;border-radius:18px}
+  .panel-head,.panel-body{padding-left:15px;padding-right:15px}
+  .panel-head{padding-top:18px}
+  .row{grid-template-columns:24px minmax(0,1fr)}
+  .row>*:last-child{grid-column:2}
+  .decoder-controls{grid-template-columns:1fr}
+  .test-actions{grid-column:auto}
+  .top-controls{align-items:stretch}
+  .top-controls>label{width:100%}
+  .top-controls .spacer{display:none}
+  .send-pill{align-self:flex-start}
+}
 </style>
 </head>
 <body>
 <main>
-<section class="hero">
-  <h1>Bolus Payload Toolkit</h1>
-  <p>Offline LoRaWAN downlink builder + Telemetry V2 / control uplink decoder</p>
-</section>
+  <header class="hero">
+    <div class="eyebrow">Bolus Firmware Tools</div>
+    <h1>Payload Toolkit</h1>
+    <p>Build configuration downlinks and decode Bolus Telemetry V2 or control-response uplinks from one offline interface.</p>
+    <div class="port-strip">
+      <div class="port-chip"><strong>FPort 2</strong><span>Telemetry V2 uplink</span></div>
+      <div class="port-chip"><strong>FPort 3</strong><span>Configuration downlink</span></div>
+      <div class="port-chip"><strong>FPort 4</strong><span>ACK/NACK uplink</span></div>
+    </div>
+  </header>
 
-<div class="banner"><strong>STAGING BOUNDARY:</strong> The payload contracts and this offline toolkit are implemented. Telemetry V2 is frozen for decoder integration, but the LoRaWAN end-to-end transport, gateway delivery, live RF apply, and hardware/network validation are still pending. Do not treat payload generation or local decoding as an RF PASS.</div>
-
-<section class="card" style="margin-bottom:16px">
-  <div class="tool-head">
-    <div><h2 style="margin-bottom:4px">Application Ports</h2><p class="muted">Current Bolus LoRaWAN application contract</p></div>
-    <div><span class="badge"><span class="port">FPort 2</span> Telemetry V2</span><span class="badge"><span class="port">FPort 3</span> Configuration Downlink</span><span class="badge"><span class="port">FPort 4</span> ACK/NACK Uplink</span></div>
-  </div>
-</section>
-
-<section class="card" style="margin-bottom:16px">
-  <div class="tool-head"><div><h2>1. Downlink Builder</h2><p class="muted">Tick only the settings you want to change. Output is a Protocol v1 TLV request for FPort 3.</p></div></div>
-  <div class="controls" style="margin:12px 0"><label>Transaction ID<input id="txid" type="number" min="0" max="255" value="1"></label><button class="secondary" id="nextTx">Next Transaction</button><div><strong>Send on:</strong> <span class="port">FPort 3</span></div></div>
-
-  <div class="grid">
-    <section class="card"><h2>Motion / Event</h2>
-      <div class="row"><input class="enable" data-target="bmaEvent" type="checkbox"><label>BMA Event sensitivity<small>Independent from Step Counter sensitivity.</small></label><select id="bmaEvent" disabled><option value="0">RAW (0)</option><option value="1">VERY_LOW (1)</option><option value="2">LOW (2)</option><option value="3">LEVEL_1 (3)</option><option value="4" selected>LEVEL_2 (4)</option><option value="5">LEVEL_3 (5)</option><option value="6">LEVEL_4 (6)</option><option value="7">OFF (7)</option></select></div>
-      <div class="row"><input class="enable" data-target="bmaStep" type="checkbox"><label>BMA Step sensitivity<small>Current RuntimeConfig accepts Default, Level 1, and Level 7.</small></label><select id="bmaStep" disabled><option value="0">DEFAULT (0)</option><option value="1">LEVEL_1 (1)</option><option value="7">LEVEL_7 (7)</option></select></div>
-      <div class="row"><input class="enable" data-target="guard" type="checkbox"><label>Episode retrigger guard<small>0..60000 ms and must be shorter than quiet timeout.</small></label><input id="guard" type="number" min="0" max="60000" value="2000" disabled></div>
-      <div class="row"><input class="enable" data-target="quiet" type="checkbox"><label>Episode quiet timeout<small>1..3600 s.</small></label><input id="quiet" type="number" min="1" max="3600" value="120" disabled></div>
-      <div class="row"><input class="enable" data-target="eventEnable" type="checkbox"><label>Event processing<small>Enable or disable event processing.</small></label><select id="eventEnable" disabled><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
-    </section>
-
-    <section class="card"><h2>Temperature / MPU</h2>
-      <div class="row"><input class="enable" data-target="tmpPeriod" type="checkbox"><label>TMP117 background period<small>1..86400 s.</small></label><input id="tmpPeriod" type="number" min="1" max="86400" value="600" disabled></div>
-      <div class="row"><input class="enable" data-target="mpuBurst" type="checkbox"><label>MPU burst duration<small>100..500 ms.</small></label><input id="mpuBurst" type="number" min="100" max="500" value="250" disabled></div>
-      <div class="row"><input class="enable" data-target="mpuTrigger" type="checkbox"><label>MPU event trigger<small>Enable or disable event-triggered MPU bursts.</small></label><select id="mpuTrigger" disabled><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
-    </section>
-
-    <section class="card"><h2>Telemetry</h2>
-      <div class="row"><input class="enable" data-target="uplinkPeriod" type="checkbox"><label>Uplink / telemetry period<small>1..86400 s; default 900 s.</small></label><input id="uplinkPeriod" type="number" min="1" max="86400" value="900" disabled></div>
-    </section>
-
-    <section class="card"><h2>RF / Radio Policy <span class="badge">LIVE APPLY UNTESTED</span></h2>
-      <div class="row"><input class="enable" data-target="txPower" type="checkbox"><label>TX power<small>2..20 dBm RuntimeConfig field; LoRaWAN live mapping is still pending.</small></label><input id="txPower" type="number" min="2" max="20" value="10" disabled></div>
-      <div class="row"><input class="enable" data-target="sf" type="checkbox"><label>Spreading Factor<small>SF7..SF12 RuntimeConfig field.</small></label><select id="sf" disabled><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
-      <div class="row"><input class="enable" data-target="bw" type="checkbox"><label>Bandwidth index<small>0=125 kHz, 1=250 kHz, 2=500 kHz. LoRaWAN regional rules may constrain the live value.</small></label><select id="bw" disabled><option value="0">0 — 125 kHz</option><option value="1">1 — 250 kHz</option><option value="2">2 — 500 kHz</option></select></div>
-      <div class="row"><input class="enable" data-target="cr" type="checkbox"><label>Coding rate<small>1=4/5 through 4=4/8. EU868 LoRaWAN currently derives PHY settings from data rate.</small></label><select id="cr" disabled><option value="1">1 — 4/5</option><option value="2">2 — 4/6</option><option value="3">3 — 4/7</option><option value="4">4 — 4/8</option></select></div>
-      <div class="row"><input class="enable" data-target="txTimeout" type="checkbox"><label>TX timeout<small>500..10000 ms.</small></label><input id="txTimeout" type="number" min="500" max="10000" value="3000" disabled></div>
-      <div class="row"><input class="enable" data-target="retryDelay" type="checkbox"><label>Retry delay<small>0..60000 ms.</small></label><input id="retryDelay" type="number" min="0" max="60000" value="2000" disabled></div>
-      <div class="row"><input class="enable" data-target="maxAttempts" type="checkbox"><label>Max TX attempts<small>1..5.</small></label><input id="maxAttempts" type="number" min="1" max="5" value="3" disabled></div>
-    </section>
+  <div class="notice">
+    <div class="notice-icon">!</div>
+    <div><strong>Staging boundary.</strong> The payload contracts and this offline toolkit are implemented. Telemetry V2 is frozen for decoder integration, but LoRaWAN end-to-end transport, gateway delivery, live RF apply, and hardware/network validation are still pending. Local payload generation or decoding is not an RF PASS.</div>
   </div>
 
-  <div class="divider"></div>
-  <h3>Generated Downlink</h3>
-  <div class="controls"><button id="generate">Generate Payload</button><button class="secondary" id="clear">Clear Selection</button></div>
-  <div id="status" class="status info">Select at least one setting.</div>
-  <label>HEX — space separated</label><textarea id="hexSpaced" class="output" readonly></textarea><div class="controls"><button class="secondary copy" data-source="hexSpaced">Copy HEX</button></div>
-  <label>HEX — compact</label><textarea id="hexCompact" class="output" readonly></textarea><div class="controls"><button class="secondary copy" data-source="hexCompact">Copy Compact HEX</button></div>
-  <label>Base64</label><textarea id="base64" class="output" readonly></textarea><div class="controls"><button class="secondary copy" data-source="base64">Copy Base64</button></div>
-</section>
+  <div class="workspace">
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title">
+          <div class="step">1</div>
+          <div>
+            <h2>Downlink Builder</h2>
+            <p>Select only the settings you want to change. The output is a Protocol v1 TLV request for FPort 3.</p>
+          </div>
+        </div>
+      </div>
 
-<section class="card" style="margin-top:16px">
-  <div class="tool-head"><div><h2>2. Uplink Decoder</h2><p class="muted">Decodes the exact firmware wire contract: Telemetry V2 on FPort 2 or configuration ACK/NACK on FPort 4.</p></div></div>
-  <div class="controls" style="margin:12px 0">
-    <label>Uplink FPort<select id="uplinkPort"><option value="2">2 — Telemetry V2</option><option value="4">4 — ACK/NACK control response</option></select></label>
-    <label>Input encoding<select id="uplinkEncoding"><option value="hex">HEX</option><option value="base64">Base64</option></select></label>
-    <button class="ghost" id="loadTelemetryExample">Load Telemetry Test Vector</button>
-    <button class="ghost" id="loadAckExample">Load ACK Test Vector</button>
+      <div class="panel-body">
+        <div class="top-controls">
+          <label>Transaction ID
+            <input id="txid" type="number" min="0" max="255" value="1">
+          </label>
+          <button class="secondary" id="nextTx">Next Transaction</button>
+          <div class="spacer"></div>
+          <div class="send-pill">Target · FPort 3</div>
+        </div>
+
+        <div class="config-grid">
+          <section class="subcard">
+            <div class="subcard-head"><h3>Motion / Event</h3><span class="subcard-tag">BMA456</span></div>
+            <div class="row"><input class="enable" data-target="bmaEvent" type="checkbox"><label>BMA Event sensitivity<small>Independent from Step Counter sensitivity.</small></label><select id="bmaEvent" disabled><option value="0">RAW (0)</option><option value="1">VERY_LOW (1)</option><option value="2">LOW (2)</option><option value="3">LEVEL_1 (3)</option><option value="4" selected>LEVEL_2 (4)</option><option value="5">LEVEL_3 (5)</option><option value="6">LEVEL_4 (6)</option><option value="7">OFF (7)</option></select></div>
+            <div class="row"><input class="enable" data-target="bmaStep" type="checkbox"><label>BMA Step sensitivity<small>Current RuntimeConfig accepts Default, Level 1, and Level 7.</small></label><select id="bmaStep" disabled><option value="0">DEFAULT (0)</option><option value="1">LEVEL_1 (1)</option><option value="7">LEVEL_7 (7)</option></select></div>
+            <div class="row"><input class="enable" data-target="guard" type="checkbox"><label>Episode retrigger guard<small>0..60000 ms and must be shorter than quiet timeout.</small></label><input id="guard" type="number" min="0" max="60000" value="2000" disabled></div>
+            <div class="row"><input class="enable" data-target="quiet" type="checkbox"><label>Episode quiet timeout<small>1..3600 s.</small></label><input id="quiet" type="number" min="1" max="3600" value="120" disabled></div>
+            <div class="row"><input class="enable" data-target="eventEnable" type="checkbox"><label>Event processing<small>Enable or disable event processing.</small></label><select id="eventEnable" disabled><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
+          </section>
+
+          <section class="subcard">
+            <div class="subcard-head"><h3>Temperature / MPU</h3><span class="subcard-tag">Sensors</span></div>
+            <div class="row"><input class="enable" data-target="tmpPeriod" type="checkbox"><label>TMP117 background period<small>1..86400 s.</small></label><input id="tmpPeriod" type="number" min="1" max="86400" value="600" disabled></div>
+            <div class="row"><input class="enable" data-target="mpuBurst" type="checkbox"><label>MPU burst duration<small>100..500 ms.</small></label><input id="mpuBurst" type="number" min="100" max="500" value="250" disabled></div>
+            <div class="row"><input class="enable" data-target="mpuTrigger" type="checkbox"><label>MPU event trigger<small>Enable or disable event-triggered MPU bursts.</small></label><select id="mpuTrigger" disabled><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
+          </section>
+
+          <section class="subcard">
+            <div class="subcard-head"><h3>Telemetry</h3><span class="subcard-tag">Uplink</span></div>
+            <div class="row"><input class="enable" data-target="uplinkPeriod" type="checkbox"><label>Uplink / telemetry period<small>1..86400 s; default 900 s.</small></label><input id="uplinkPeriod" type="number" min="1" max="86400" value="900" disabled></div>
+          </section>
+
+          <section class="subcard">
+            <div class="subcard-head"><h3>RF / Radio Policy</h3><span class="subcard-tag warn">Live apply untested</span></div>
+            <div class="row"><input class="enable" data-target="txPower" type="checkbox"><label>TX power<small>2..20 dBm RuntimeConfig field; LoRaWAN live mapping is still pending.</small></label><input id="txPower" type="number" min="2" max="20" value="10" disabled></div>
+            <div class="row"><input class="enable" data-target="sf" type="checkbox"><label>Spreading Factor<small>SF7..SF12 RuntimeConfig field.</small></label><select id="sf" disabled><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
+            <div class="row"><input class="enable" data-target="bw" type="checkbox"><label>Bandwidth index<small>0=125 kHz, 1=250 kHz, 2=500 kHz. Regional rules may constrain the live value.</small></label><select id="bw" disabled><option value="0">0 — 125 kHz</option><option value="1">1 — 250 kHz</option><option value="2">2 — 500 kHz</option></select></div>
+            <div class="row"><input class="enable" data-target="cr" type="checkbox"><label>Coding rate<small>1=4/5 through 4=4/8. EU868 LoRaWAN currently derives PHY settings from data rate.</small></label><select id="cr" disabled><option value="1">1 — 4/5</option><option value="2">2 — 4/6</option><option value="3">3 — 4/7</option><option value="4">4 — 4/8</option></select></div>
+            <div class="row"><input class="enable" data-target="txTimeout" type="checkbox"><label>TX timeout<small>500..10000 ms.</small></label><input id="txTimeout" type="number" min="500" max="10000" value="3000" disabled></div>
+            <div class="row"><input class="enable" data-target="retryDelay" type="checkbox"><label>Retry delay<small>0..60000 ms.</small></label><input id="retryDelay" type="number" min="0" max="60000" value="2000" disabled></div>
+            <div class="row"><input class="enable" data-target="maxAttempts" type="checkbox"><label>Max TX attempts<small>1..5.</small></label><input id="maxAttempts" type="number" min="1" max="5" value="3" disabled></div>
+          </section>
+        </div>
+
+        <div class="section-break"></div>
+
+        <div class="output-head">
+          <h3>Generated Downlink</h3>
+          <div class="actions"><button id="generate">Generate Payload</button><button class="secondary" id="clear">Clear Selection</button></div>
+        </div>
+        <div id="status" class="status info">Select at least one setting.</div>
+
+        <div class="output-grid">
+          <div class="output-box">
+            <div class="box-head"><span>HEX · spaced</span><button class="secondary copy" data-source="hexSpaced">Copy</button></div>
+            <textarea id="hexSpaced" class="output" readonly></textarea>
+          </div>
+          <div class="output-box">
+            <div class="box-head"><span>HEX · compact</span><button class="secondary copy" data-source="hexCompact">Copy</button></div>
+            <textarea id="hexCompact" class="output" readonly></textarea>
+          </div>
+          <div class="output-box">
+            <div class="box-head"><span>Base64</span><button class="secondary copy" data-source="base64">Copy</button></div>
+            <textarea id="base64" class="output" readonly></textarea>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title">
+          <div class="step">2</div>
+          <div>
+            <h2>Uplink Decoder</h2>
+            <p>Decode the exact firmware wire contract: Telemetry V2 on FPort 2 or configuration ACK/NACK on FPort 4.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-body">
+        <div class="decoder-controls">
+          <label>Uplink FPort
+            <select id="uplinkPort"><option value="2">2 — Telemetry V2</option><option value="4">4 — ACK/NACK response</option></select>
+          </label>
+          <label>Input encoding
+            <select id="uplinkEncoding"><option value="hex">HEX</option><option value="base64">Base64</option></select>
+          </label>
+          <div class="test-actions"><button class="ghost" id="loadTelemetryExample">Telemetry Test Vector</button><button class="ghost" id="loadAckExample">ACK Test Vector</button></div>
+        </div>
+
+        <div id="uplinkStatus" class="status info">Telemetry V2 must be exactly 32 bytes. ACK/NACK must be exactly 8 bytes.</div>
+
+        <div class="decoder-grid">
+          <div class="io-card">
+            <div class="io-head"><strong>Raw uplink payload</strong><span class="subcard-tag">Input</span></div>
+            <textarea id="uplinkInput" class="output" placeholder="21 34 12 0B 8F 57 ..."></textarea>
+            <div class="actions"><button id="decodeUplinkBtn">Decode Uplink</button><button class="secondary" id="clearUplink">Clear</button></div>
+          </div>
+
+          <div class="io-card">
+            <div class="io-head"><strong>Decoded JSON</strong><button class="secondary copy" data-source="uplinkJson">Copy JSON</button></div>
+            <textarea id="uplinkJson" class="output json" readonly></textarea>
+          </div>
+        </div>
+
+        <details class="details">
+          <summary>Telemetry V2 quick map</summary>
+          <table class="protocol-table">
+            <thead><tr><th>Bytes</th><th>Field</th></tr></thead>
+            <tbody>
+              <tr><td>0</td><td>Version/message header: current summary = <code>0x21</code></td></tr>
+              <tr><td>1–2</td><td>Sequence, little-endian</td></tr>
+              <tr><td>3</td><td>RuntimeConfig version</td></tr>
+              <tr><td>4</td><td>Status/validity flags</td></tr>
+              <tr><td>5–7</td><td>Battery % and mV</td></tr>
+              <tr><td>8–15</td><td>Temperature current/min/max/negative excursion</td></tr>
+              <tr><td>16–22</td><td>Episode, pulse, inter-pulse, MPU burst counts</td></tr>
+              <tr><td>23–28</td><td>Quantized MPU features</td></tr>
+              <tr><td>29–30</td><td>Reserved classifier candidate counts</td></tr>
+              <tr><td>31</td><td>Event/reference flags — not CRC</td></tr>
+            </tbody>
+          </table>
+        </details>
+      </div>
+    </section>
   </div>
-  <label>Raw uplink payload</label><textarea id="uplinkInput" class="output" placeholder="21 34 12 0B 8F 57 ..."></textarea>
-  <div class="controls"><button id="decodeUplinkBtn">Decode Uplink</button><button class="secondary" id="clearUplink">Clear</button></div>
-  <div id="uplinkStatus" class="status info">Telemetry V2 must be exactly 32 bytes. ACK/NACK must be exactly 8 bytes.</div>
-  <label>Decoded JSON</label><textarea id="uplinkJson" class="output json" readonly></textarea>
-  <div class="controls"><button class="secondary copy" data-source="uplinkJson">Copy JSON</button></div>
 
-  <details style="margin-top:14px"><summary><strong>Telemetry V2 quick map</strong></summary>
-    <table class="protocol-table"><thead><tr><th>Bytes</th><th>Field</th></tr></thead><tbody>
-      <tr><td>0</td><td>Version/message header: current summary = <code>0x21</code></td></tr><tr><td>1–2</td><td>Sequence, little-endian</td></tr><tr><td>3</td><td>RuntimeConfig version</td></tr><tr><td>4</td><td>Status/validity flags</td></tr><tr><td>5–7</td><td>Battery % and mV</td></tr><tr><td>8–15</td><td>Temperature current/min/max/negative excursion</td></tr><tr><td>16–22</td><td>Episode, pulse, inter-pulse, MPU burst counts</td></tr><tr><td>23–28</td><td>Quantized MPU features</td></tr><tr><td>29–30</td><td>Reserved classifier candidate counts</td></tr><tr><td>31</td><td>Event/reference flags — not CRC</td></tr>
-    </tbody></table>
-  </details>
-</section>
-
-<footer>Firmware sources of truth: <code>App/Services/telemetry_codec.c</code>, <code>App/Services/downlink_management_service.h</code>, and <code>App/Config/bolus_lorawan_credentials.h</code>. Keep this toolkit and the network-server decoders synchronized whenever the wire protocol changes.</footer>
+  <footer>Firmware sources of truth: <code>App/Services/telemetry_codec.c</code>, <code>App/Services/downlink_management_service.h</code>, and <code>App/Config/bolus_lorawan_credentials.h</code>. Keep this toolkit and the network-server decoders synchronized whenever the wire protocol changes.</footer>
 </main>
 <script>
 'use strict';
