@@ -45,18 +45,24 @@ extern "C"
 
 
 /* Exported types ------------------------------------------------------------*/
+/*
+ * LoRaMac-node status.
+ *
+ * The imported 4.4.7 utility header used the generic SUCCESS/FAIL macros.
+ * Those names collide with STM32 CMSIS (ErrorStatus::SUCCESS/ERROR).  Newer
+ * upstream LoRaMac-node releases replaced the macros with this scoped status
+ * enum.  Keep the same numeric semantics here without polluting CMSIS names.
+ */
+typedef enum LmnStatus_e
+{
+    LMN_STATUS_ERROR = 0,
+    LMN_STATUS_OK = !LMN_STATUS_ERROR
+} LmnStatus_t;
+
 /* Exported constants --------------------------------------------------------*/
 /* External variables --------------------------------------------------------*/
 /* Exported macros -----------------------------------------------------------*/
 /* Defines -------------------------------------------------------------------*/
-
-#ifndef SUCCESS
-#define SUCCESS                                     1
-#endif
-
-#ifndef FAIL
-#define FAIL                                        0
-#endif
 
 /*!
  * \brief Returns the minimum value between a and b
