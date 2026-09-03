@@ -127,6 +127,55 @@ static downlink_result_t ApplyCommand(
             *apply_mask |= DOWNLINK_APPLY_MPU_SENSOR;
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
+        /*
+         * [UNTESTED] RF/runtime radio policy commands.
+         * These update RuntimeConfig atomically. They deliberately set the
+         * RADIO_POLICY pending bit because the LoRaWAN MAC live-apply path has
+         * not yet been implemented/validated. BolusRuntimeConfig_Validate()
+         * remains the final authoritative range check for the whole candidate.
+         */
+        case DOWNLINK_CMD_SET_RF_TX_POWER_DBM:
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            candidate->radio.tx_power_dbm = (int8_t)value[0];
+            *apply_mask |= DOWNLINK_APPLY_RADIO_POLICY;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
+        case DOWNLINK_CMD_SET_RF_SPREADING_FACTOR:
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            candidate->radio.spreading_factor = value[0];
+            *apply_mask |= DOWNLINK_APPLY_RADIO_POLICY;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
+        case DOWNLINK_CMD_SET_RF_BANDWIDTH_INDEX:
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            candidate->radio.bandwidth_index = value[0];
+            *apply_mask |= DOWNLINK_APPLY_RADIO_POLICY;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
+        case DOWNLINK_CMD_SET_RF_CODING_RATE:
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            candidate->radio.coding_rate = value[0];
+            *apply_mask |= DOWNLINK_APPLY_RADIO_POLICY;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
+        case DOWNLINK_CMD_SET_RF_TX_TIMEOUT_MS:
+            if (length != 2U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            candidate->radio.tx_timeout_ms = ReadU16Le(value);
+            *apply_mask |= DOWNLINK_APPLY_RADIO_POLICY;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
+        case DOWNLINK_CMD_SET_RF_RETRY_DELAY_MS:
+            if (length != 2U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            candidate->radio.retry_delay_ms = ReadU16Le(value);
+            *apply_mask |= DOWNLINK_APPLY_RADIO_POLICY;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
+        case DOWNLINK_CMD_SET_RF_MAX_TX_ATTEMPTS:
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            candidate->radio.max_tx_attempts = value[0];
+            *apply_mask |= DOWNLINK_APPLY_RADIO_POLICY;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
         default:
             return DOWNLINK_RESULT_ERROR_COMMAND;
     }
