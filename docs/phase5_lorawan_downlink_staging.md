@@ -16,6 +16,8 @@ This status is intentional. The code exists in the branch, but it must **not** b
 - Duplicate successful transaction IDs are detected so a repeated command is not applied twice.
 - Invalid magic/version/length/command/value/config combinations produce NACK results rather than partial configuration changes.
 - Downlink and response diagnostics are exposed for Live Expressions.
+- RF/radio RuntimeConfig fields are now addressable through separate downlink command IDs.
+- A standalone offline generator exists at `Bolus_Downlink_Configurator/index.html` for selecting settings and generating FPort-3 HEX/Base64 payloads. The same page can decode the fixed FPort-4 ACK/NACK format.
 
 ## Important activation boundary
 
@@ -32,10 +34,39 @@ Current apply-mask bits:
 - bit 2 — EventEpisode policy reconfiguration required
 - bit 3 — MPU service reconfiguration required
 - bit 4 — TelemetryWindow period reconfiguration required
+- bit 5 — Radio/LoRaWAN policy reconfiguration required
 
 The TMP background sample period is read directly from RuntimeConfig by the existing main loop, so that one does not require a cached-service re-init.
 
 **Do not clear `pending_apply_mask` or describe these settings as fully applied until the live-reconfiguration stage is implemented and tested.**
+
+## RF boundary
+
+The new RF commands modify the corresponding fields already present in `RuntimeConfig.radio`:
+
+- TX power dBm
+- spreading factor
+- bandwidth index
+- coding rate
+- TX timeout
+- retry delay
+- maximum TX attempts
+
+These commands are **implemented as atomic RuntimeConfig updates but remain UNTESTED and PENDING_APPLY**.
+
+The imported EU868 LoRaWAN stack derives its actual LoRa PHY modulation from LoRaWAN data-rate/region rules. Therefore the current RF command support must not yet be described as verified live MAC/PHY reconfiguration. A later apply layer must map supported RuntimeConfig policy into LoRaMAC/RegionEU868 semantics and validate the result over the network.
+
+The existing `BolusRuntimeConfig_Validate()` is still the final range validator. Current accepted RuntimeConfig ranges are:
+
+- TX power: 2..20 dBm
+- SF: 7..12
+- bandwidth index: 0..2
+- coding rate: 1..4
+- TX timeout: 500..10000 ms
+- retry delay: 0..60000 ms
+- maximum TX attempts: 1..5
+
+These ranges are configuration-contract ranges; they are not a statement that every combination is a standards-valid EU868 LoRaWAN PHY configuration.
 
 ## Downlink request packet
 
@@ -64,10 +95,45 @@ No application CRC is added because the LoRaWAN frame already has MAC-layer inte
 | `0x07` | Uplink/telemetry window period, s | 4 | `radio.uplink_period_s` | pending TelemetryWindow apply |
 | `0x08` | Event processing enable | 1 | `event_processing.enable` | pending BMA + Episode apply |
 | `0x09` | MPU event-trigger enable | 1 | `mpu.event_trigger_enable` | pending MPU apply |
+| `0x0A` | RF TX power, dBm | 1 | `radio.tx_power_dbm` | pending Radio/LoRaWAN apply |
+| `0x0B` | RF spreading factor | 1 | `radio.spreading_factor` | pending Radio/LoRaWAN apply |
+| `0x0C` | RF bandwidth index | 1 | `radio.bandwidth_index` | pending Radio/LoRaWAN apply |
+| `0x0D` | RF coding rate | 1 | `radio.coding_rate` | pending Radio/LoRaWAN apply |
+| `0x0E` | RF TX timeout, ms | 2 | `radio.tx_timeout_ms` | pending Radio/LoRaWAN apply |
+| `0x0F` | RF retry delay, ms | 2 | `radio.retry_delay_ms` | pending Radio/LoRaWAN apply |
+| `0x10` | RF max TX attempts | 1 | `radio.max_tx_attempts` | pending Radio/LoRaWAN apply |
 
 The existing `BolusRuntimeConfig_Validate()` remains the authoritative final range/consistency validator. For example, the present firmware only accepts the Step sensitivity values already permitted by RuntimeConfig validation; the downlink parser does not bypass that policy.
 
 BMA Step sensitivity and BMA Event sensitivity remain separate commands and separate fields.
+
+## Offline configurator
+
+Folder:
+
+```text
+Bolus_Downlink_Configurator/
+```
+
+Open:
+
+```text
+Bolus_Downlink_Configurator/index.html
+```
+
+The page has no external dependency and is intended to run locally in a browser. It provides:
+
+- per-setting checkboxes;
+- grouped Motion/Event, Temperature/MPU, Telemetry and RF settings;
+- transaction ID handling;
+- little-endian TLV construction;
+- space-separated HEX output;
+- compact HEX output;
+- Base64 output;
+- FPort reminder;
+- FPort-4 ACK/NACK decoder including apply-mask interpretation.
+
+The tool is also marked **STAGING / UNTESTED**. It is a payload-construction helper, not evidence of end-to-end validation.
 
 ## ACK/NACK response packet
 
@@ -139,6 +205,8 @@ including:
 - Invalid/malformed payload rejection on target hardware.
 - RuntimeConfig candidate validation on target hardware.
 - Live application of BMA/EventEpisode/MPU/TelemetryWindow cached configuration.
+- Live application of RF commands into LoRaMAC/RegionEU868/radio state.
+- Browser configurator cross-check against a real network-server downlink.
 - Persistence of modified config across reset/power loss.
 - LoRaMAC NVM/session persistence.
 - STOP2/RTC/LPTIM interaction.
@@ -155,5 +223,7 @@ including:
 7. Confirm atomic RAM config update and FPort-4 ACK.
 8. Send malformed/unknown commands and confirm NACK with no partial config change.
 9. Validate duplicate transaction behavior.
-10. Implement and separately test cached-service live reconfiguration, then clear apply-mask bits only on actual success.
-11. Only after those tests change the validation status from UNTESTED.
+10. Cross-check one payload generated by `Bolus_Downlink_Configurator/index.html` against manual bytes.
+11. Validate RF commands update RuntimeConfig and set `DOWNLINK_APPLY_RADIO_POLICY` without claiming live PHY change.
+12. Implement and separately test cached-service and LoRaWAN RF live reconfiguration, then clear apply-mask bits only on actual success.
+13. Only after those tests change the validation status from UNTESTED.
