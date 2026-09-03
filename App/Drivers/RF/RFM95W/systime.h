@@ -3,6 +3,13 @@
 
 #include <stdint.h>
 
+/*
+ * Number of seconds between the Unix epoch (1970-01-01) and GPS epoch
+ * (1980-01-06). LoRaMAC uses this when processing DeviceTimeAns.
+ * Keep this value aligned with the I-CUBE-LRWAN systime contract.
+ */
+#define UNIX_GPS_EPOCH_OFFSET ((uint32_t)315964800U)
+
 typedef struct SysTime_s
 {
     uint32_t Seconds;
