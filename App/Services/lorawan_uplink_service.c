@@ -343,16 +343,34 @@ static LoRaMacStatus_t SetMib(Mib_t type, MibParam_t param)
 
 static bool ConfigureMacPolicy(void)
 {
+    MibRequestConfirm_t current_class;
     MibParam_t param;
     LoRaMacStatus_t status;
 
-    memset(&param, 0, sizeof(param));
-    param.Class = CLASS_A;
-    status = SetMib(MIB_DEVICE_CLASS, param);
+    /*
+     * LoRaMac 4.4.7 returns PARAMETER_INVALID when MIB_DEVICE_CLASS is set to
+     * CLASS_A while the current class is already CLASS_A. Query first and only
+     * request a class transition when one is actually required.
+     */
+    memset(&current_class, 0, sizeof(current_class));
+    current_class.Type = MIB_DEVICE_CLASS;
+    status = LoRaMacMibGetRequestConfirm(&current_class);
     if (status != LORAMAC_STATUS_OK)
     {
         lorawan_uplink_service_diag.last_mac_status = status;
         return false;
+    }
+
+    if (current_class.Param.Class != CLASS_A)
+    {
+        memset(&param, 0, sizeof(param));
+        param.Class = CLASS_A;
+        status = SetMib(MIB_DEVICE_CLASS, param);
+        if (status != LORAMAC_STATUS_OK)
+        {
+            lorawan_uplink_service_diag.last_mac_status = status;
+            return false;
+        }
     }
 
     memset(&param, 0, sizeof(param));
@@ -373,6 +391,7 @@ static bool ConfigureMacPolicy(void)
         return false;
     }
 
+    lorawan_uplink_service_diag.last_mac_status = LORAMAC_STATUS_OK;
     return true;
 }
 
