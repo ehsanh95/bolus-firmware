@@ -96,7 +96,7 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
     config->event_processing.hyperthermia_reference_mdeg_c = 40000L;
     config->event_processing.sara_risk_reference_mdeg_c = 39400L;
 
-    config->radio.uplink_period_s = 900U;
+    config->radio.uplink_period_s = 120U;
     config->radio.tx_power_dbm = 10;
     config->radio.spreading_factor = 7U;
     config->radio.bandwidth_index = 0U;
