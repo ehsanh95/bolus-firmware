@@ -47,7 +47,13 @@ typedef struct
     uint64_t mpu_total_angular_motion_cdeg;
     uint16_t mpu_max_orientation_change_cdeg;
 
-    /* Classifier outputs are reserved now and remain zero until connected. */
+    /* Native BMA456 telemetry cache. Never sourced from MPU6050. */
+    bool bma456_valid;
+    uint32_t bma_step_count;
+    int16_t bma_accel_x_mg;
+    int16_t bma_accel_y_mg;
+    int16_t bma_accel_z_mg;
+
     uint16_t contraction_candidate_count;
     uint16_t rotation_candidate_count;
     uint32_t combined_event_flags;
@@ -74,13 +80,13 @@ void TelemetryWindow_RecordMpuBurst(
     telemetry_window_service_t *service,
     const sensor_service_mpu_burst_features_t *features);
 
-/*
- * Freeze one compact summary and immediately roll the active accumulator into
- * the next 15-minute window. Radio transmission is deliberately separate.
- *
- * STAGING NOTE: this path is prepared without board/build validation on
- * 2026-08-30. The caller should retain the frozen summary/payload for retry.
- */
+void TelemetryWindow_RecordBma456(
+    telemetry_window_service_t *service,
+    uint32_t step_count,
+    int16_t accel_x_mg,
+    int16_t accel_y_mg,
+    int16_t accel_z_mg);
+
 telemetry_window_status_t TelemetryWindow_FreezeSummaryV2(
     telemetry_window_service_t *service,
     const bolus_runtime_config_t *config,
