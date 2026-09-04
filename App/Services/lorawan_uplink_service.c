@@ -68,6 +68,15 @@ static uint8_t s_f_nwk_s_int_key[16] = BOLUS_LORAWAN_F_NWK_S_INT_KEY_BYTES;
 static uint8_t s_s_nwk_s_int_key[16] = BOLUS_LORAWAN_S_NWK_S_INT_KEY_BYTES;
 static uint8_t s_app_s_key[16] = BOLUS_LORAWAN_APP_S_KEY_BYTES;
 
+/*
+ * LoRaMacInitialization stores these pointers in MacCtx and uses them later
+ * from TxDone/RxDone and MCPS/MLME processing. They therefore must have static
+ * lifetime; stack-local instances become invalid as soon as Init returns and
+ * can turn a later TxDone callback into a HardFault.
+ */
+static LoRaMacPrimitives_t s_mac_primitives;
+static LoRaMacCallback_t s_mac_callbacks;
+
 lorawan_uplink_diag_t lorawan_uplink_service_diag = {0};
 
 static bool TimeReached(uint32_t now_ms, uint32_t deadline_ms)
@@ -645,8 +654,6 @@ static void TrySendHead(uint32_t now_ms)
 lorawan_uplink_status_t LoRaWanUplinkService_Init(
     bolus_runtime_config_t *config)
 {
-    LoRaMacPrimitives_t primitives;
-    LoRaMacCallback_t callbacks;
     LoRaMacStatus_t mac_status;
 
     if ((config == NULL) || !BolusRuntimeConfig_Validate(config))
@@ -685,22 +692,22 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
         return LORAWAN_UPLINK_ERROR_CONFIG;
     }
 
-    memset(&primitives, 0, sizeof(primitives));
-    primitives.MacMcpsConfirm = MacMcpsConfirm;
-    primitives.MacMcpsIndication = MacMcpsIndication;
-    primitives.MacMlmeConfirm = MacMlmeConfirm;
-    primitives.MacMlmeIndication = MacMlmeIndication;
+    memset(&s_mac_primitives, 0, sizeof(s_mac_primitives));
+    s_mac_primitives.MacMcpsConfirm = MacMcpsConfirm;
+    s_mac_primitives.MacMcpsIndication = MacMcpsIndication;
+    s_mac_primitives.MacMlmeConfirm = MacMlmeConfirm;
+    s_mac_primitives.MacMlmeIndication = MacMlmeIndication;
 
-    memset(&callbacks, 0, sizeof(callbacks));
-    callbacks.GetBatteryLevel = MacGetBatteryLevel;
-    callbacks.GetTemperatureLevel = MacGetTemperatureLevel;
-    callbacks.GetUniqueId = MacGetUniqueId;
-    callbacks.NvmDataChange = MacNvmDataChange;
-    callbacks.MacProcessNotify = MacProcessNotify;
+    memset(&s_mac_callbacks, 0, sizeof(s_mac_callbacks));
+    s_mac_callbacks.GetBatteryLevel = MacGetBatteryLevel;
+    s_mac_callbacks.GetTemperatureLevel = MacGetTemperatureLevel;
+    s_mac_callbacks.GetUniqueId = MacGetUniqueId;
+    s_mac_callbacks.NvmDataChange = MacNvmDataChange;
+    s_mac_callbacks.MacProcessNotify = MacProcessNotify;
 
     mac_status = LoRaMacInitialization(
-        &primitives,
-        &callbacks,
+        &s_mac_primitives,
+        &s_mac_callbacks,
         LORAMAC_REGION_EU868);
     lorawan_uplink_service_diag.last_mac_status = mac_status;
 
