@@ -22,6 +22,7 @@
  */
 
 #define LORAWAN_UPLINK_BUSY_RETRY_MS       100UL
+#define LORAWAN_UPLINK_TX_WATCHDOG_MS      15000UL
 #define LORAWAN_ABP_LRWAN_VERSION_V103     0x01000300UL
 
 typedef struct
@@ -60,6 +61,7 @@ static bool s_initialized = false;
 static bool s_joined = false;
 static bool s_tx_in_flight = false;
 static lorawan_tx_kind_t s_tx_kind = LORAWAN_TX_KIND_NONE;
+static uint32_t s_tx_watchdog_deadline_ms = 0U;
 static uint32_t s_next_action_tick_ms = 0U;
 static uint32_t s_retry_delay_ms = 2000U;
 static uint8_t s_max_tx_attempts = 3U;
@@ -79,9 +81,30 @@ static LoRaMacCallback_t s_mac_callbacks;
 
 lorawan_uplink_diag_t lorawan_uplink_service_diag = {0};
 
+static bool ConfigureMacPolicy(void);
+static bool ConfigureAbpSession(void);
+static bool ActivateAbpSession(void);
+
 static bool TimeReached(uint32_t now_ms, uint32_t deadline_ms)
 {
     return ((int32_t)(now_ms - deadline_ms) >= 0);
+}
+
+static void ClearTxInFlight(void)
+{
+    s_tx_kind = LORAWAN_TX_KIND_NONE;
+    s_tx_in_flight = false;
+    s_tx_watchdog_deadline_ms = 0U;
+    lorawan_uplink_service_diag.tx_in_flight = false;
+    lorawan_uplink_service_diag.tx_watchdog_deadline_ms = 0U;
+}
+
+static void ArmTxWatchdog(uint32_t now_ms)
+{
+    s_tx_watchdog_deadline_ms =
+        now_ms + LORAWAN_UPLINK_TX_WATCHDOG_MS;
+    lorawan_uplink_service_diag.tx_watchdog_deadline_ms =
+        s_tx_watchdog_deadline_ms;
 }
 
 static lorawan_uplink_queue_entry_t *QueueHead(void)
@@ -212,9 +235,7 @@ static void MacMcpsConfirm(McpsConfirm_t *confirm)
     }
 
     completed_kind = s_tx_kind;
-    s_tx_kind = LORAWAN_TX_KIND_NONE;
-    s_tx_in_flight = false;
-    lorawan_uplink_service_diag.tx_in_flight = false;
+    ClearTxInFlight();
     lorawan_uplink_service_diag.last_mcps_confirm_status = confirm->Status;
     lorawan_uplink_service_diag.last_uplink_counter = confirm->UpLinkCounter;
     lorawan_uplink_service_diag.last_tx_air_time_ms = confirm->TxTimeOnAir;
@@ -222,6 +243,12 @@ static void MacMcpsConfirm(McpsConfirm_t *confirm)
     if (completed_kind == LORAWAN_TX_KIND_CONTROL_RESPONSE)
     {
         HandleControlResponseConfirm(confirm);
+        return;
+    }
+
+    if (completed_kind != LORAWAN_TX_KIND_TELEMETRY)
+    {
+        lorawan_uplink_service_diag.late_mcps_confirm_count++;
         return;
     }
 
@@ -262,6 +289,70 @@ static void MacMcpsConfirm(McpsConfirm_t *confirm)
             lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOINED_IDLE;
         }
     }
+}
+
+static void RecoverTimedOutTx(void)
+{
+    McpsConfirm_t timeout_confirm;
+    LoRaMacStatus_t recovery_status;
+    uint32_t last_uplink_counter;
+    uint32_t last_tx_air_time_ms;
+
+    lorawan_uplink_service_diag.tx_watchdog_timeout_count++;
+    FaultManager_Raise(BOLUS_FAULT_RF_TX_TIMEOUT);
+
+    /* This vendored LoRaMacStart() forces LORAMAC_IDLE, allowing the public
+     * de-initializer to stop all MAC/radio timers and reset request counters.
+     * LoRaMacDeInitialization() leaves the Crypto NVM frame counters intact. */
+    recovery_status = LoRaMacStart();
+    lorawan_uplink_service_diag.last_mac_status = recovery_status;
+    if (recovery_status == LORAMAC_STATUS_OK)
+    {
+        recovery_status = LoRaMacDeInitialization();
+        lorawan_uplink_service_diag.last_mac_status = recovery_status;
+    }
+
+    if ((recovery_status == LORAMAC_STATUS_OK) &&
+        (!ConfigureMacPolicy() || !ConfigureAbpSession()))
+    {
+        recovery_status = lorawan_uplink_service_diag.last_mac_status;
+    }
+
+    if (recovery_status == LORAMAC_STATUS_OK)
+    {
+        recovery_status = LoRaMacStart();
+        lorawan_uplink_service_diag.last_mac_status = recovery_status;
+    }
+
+    if ((recovery_status == LORAMAC_STATUS_OK) && !ActivateAbpSession())
+    {
+        recovery_status = lorawan_uplink_service_diag.last_mac_status;
+    }
+
+    if (recovery_status != LORAMAC_STATUS_OK)
+    {
+        ClearTxInFlight();
+        s_joined = false;
+        lorawan_uplink_service_diag.joined = false;
+        lorawan_uplink_service_diag.abp_session_configured = false;
+        lorawan_uplink_service_diag.tx_watchdog_recovery_failure_count++;
+        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
+        FaultManager_Raise(BOLUS_FAULT_RF_COMM);
+        return;
+    }
+
+    lorawan_uplink_service_diag.tx_watchdog_recovery_count++;
+
+    /* Reuse the normal failed-confirm path so retry/drop policy stays single. */
+    last_uplink_counter = lorawan_uplink_service_diag.last_uplink_counter;
+    last_tx_air_time_ms = lorawan_uplink_service_diag.last_tx_air_time_ms;
+    memset(&timeout_confirm, 0, sizeof(timeout_confirm));
+    timeout_confirm.Status = LORAMAC_EVENT_INFO_STATUS_TX_TIMEOUT;
+    MacMcpsConfirm(&timeout_confirm);
+
+    /* A synthesized timeout has no new radio metadata to publish. */
+    lorawan_uplink_service_diag.last_uplink_counter = last_uplink_counter;
+    lorawan_uplink_service_diag.last_tx_air_time_ms = last_tx_air_time_ms;
 }
 
 static void MacMcpsIndication(McpsIndication_t *indication, LoRaMacRxStatus_t *rx_status)
@@ -518,7 +609,8 @@ static void TrySendControlResponse(uint32_t now_ms)
     request.Req.Unconfirmed.fBufferSize = s_control_response_size;
     request.Req.Unconfirmed.Datarate = DR_0;
 
-    status = LoRaMacMcpsRequest(&request, true);
+    /* Keep duty-cycle waiting in this service instead of hiding it in LoRaMAC. */
+    status = LoRaMacMcpsRequest(&request, false);
     lorawan_uplink_service_diag.last_mac_status = status;
 
     if (status == LORAMAC_STATUS_OK)
@@ -528,6 +620,7 @@ static void TrySendControlResponse(uint32_t now_ms)
         s_tx_kind = LORAWAN_TX_KIND_CONTROL_RESPONSE;
         lorawan_uplink_service_diag.tx_in_flight = true;
         lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_TX_IN_FLIGHT;
+        ArmTxWatchdog(now_ms);
     }
     else if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED)
     {
@@ -599,7 +692,8 @@ static void TrySendHead(uint32_t now_ms)
     request.Req.Unconfirmed.Datarate = DR_0;
 #endif
 
-    status = LoRaMacMcpsRequest(&request, true);
+    /* Keep duty-cycle waiting in this service instead of hiding it in LoRaMAC. */
+    status = LoRaMacMcpsRequest(&request, false);
     lorawan_uplink_service_diag.last_mac_status = status;
 
     if (status == LORAMAC_STATUS_OK)
@@ -610,6 +704,7 @@ static void TrySendHead(uint32_t now_ms)
         lorawan_uplink_service_diag.tx_in_flight = true;
         lorawan_uplink_service_diag.tx_request_count++;
         lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_TX_IN_FLIGHT;
+        ArmTxWatchdog(now_ms);
     }
     else if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED)
     {
@@ -674,6 +769,7 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
     s_joined = false;
     s_tx_in_flight = false;
     s_tx_kind = LORAWAN_TX_KIND_NONE;
+    s_tx_watchdog_deadline_ms = 0U;
     s_next_action_tick_ms = HAL_GetTick();
     s_retry_delay_ms = config->radio.retry_delay_ms;
     s_max_tx_attempts = config->radio.max_tx_attempts;
@@ -813,6 +909,12 @@ void LoRaWanUplinkService_Process(uint32_t now_ms)
     RFM95W_Board_ProcessIrqs();
     LoRaMacProcess();
     lorawan_uplink_service_diag.mac_process_pending = false;
+
+    if (s_tx_in_flight &&
+        TimeReached(now_ms, s_tx_watchdog_deadline_ms))
+    {
+        RecoverTimedOutTx();
+    }
 
     if (!lorawan_uplink_service_diag.credentials_provisioned)
     {

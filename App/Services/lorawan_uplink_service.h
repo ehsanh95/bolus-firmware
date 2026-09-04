@@ -71,6 +71,10 @@ typedef struct
     uint32_t tx_failure_count;
     uint32_t tx_retry_count;
     uint32_t tx_drop_count;
+    uint32_t tx_watchdog_timeout_count;
+    uint32_t tx_watchdog_recovery_count;
+    uint32_t tx_watchdog_recovery_failure_count;
+    uint32_t late_mcps_confirm_count;
     uint32_t duty_cycle_defer_count;
     uint32_t mac_busy_defer_count;
     uint32_t nvm_change_count;
@@ -79,6 +83,7 @@ typedef struct
     uint32_t last_sequence_completed;
     uint32_t last_uplink_counter;
     uint32_t last_tx_air_time_ms;
+    uint32_t tx_watchdog_deadline_ms;
     uint32_t next_action_tick_ms;
 
     LoRaMacStatus_t last_mac_status;

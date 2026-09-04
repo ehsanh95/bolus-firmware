@@ -50,17 +50,11 @@ void TimerInit(
         return;
     }
 
-    obj->Timestamp = 0U;
-    obj->ReloadValue = 0U;
-    obj->IsRunning = false;
-
-    obj->Callback = callback;
-    obj->Context = NULL;
-    obj->Next = NULL;
-
-
     /*
-     * Avoid registering the same timer twice.
+     * Avoid registering the same timer twice. Check before touching Next:
+     * SX1276Init() is deliberately called again by LoRaMacInitialization(),
+     * and clearing Next on an already registered object would cut every timer
+     * after that object out of the cooperative timer list.
      */
     node = s_timer_list;
 
@@ -68,11 +62,24 @@ void TimerInit(
     {
         if (node == obj)
         {
+            obj->Timestamp = 0U;
+            obj->ReloadValue = 0U;
+            obj->IsRunning = false;
+            obj->Callback = callback;
+            obj->Context = NULL;
             return;
         }
 
         node = node->Next;
     }
+
+
+    obj->Timestamp = 0U;
+    obj->ReloadValue = 0U;
+    obj->IsRunning = false;
+    obj->Callback = callback;
+    obj->Context = NULL;
+    obj->Next = NULL;
 
 
     /*
