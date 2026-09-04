@@ -8,8 +8,8 @@
 #include "LoRaMac.h"
 
 /*
- * [UNTESTED] LoRaWAN network integration staging.
- * No clean-build/hardware/network validation is implied by this header.
+ * [UNTESTED] LoRaWAN ABP network integration staging.
+ * A clean build plus gateway/TTN validation is still required after changes.
  */
 
 typedef enum
@@ -46,15 +46,26 @@ typedef struct
     bool mac_process_pending;
     lorawan_uplink_state_t state;
 
+    /* ABP activation diagnostics. */
+    ActivationType_t activation_mode;
+    bool abp_session_configured;
+    bool abp_network_keys_match;
+    uint32_t abp_session_configure_count;
+    uint32_t abp_session_configure_failure_count;
+    uint32_t abp_dev_addr;
+
     uint8_t queue_count;
     uint8_t queue_capacity;
     uint8_t app_port;
 
     uint32_t submit_count;
     uint32_t queue_full_count;
+
+    /* Legacy OTAA counters retained for debugger/layout continuity; ABP keeps them at zero. */
     uint32_t join_request_count;
     uint32_t join_success_count;
     uint32_t join_failure_count;
+
     uint32_t tx_request_count;
     uint32_t tx_success_count;
     uint32_t tx_failure_count;
