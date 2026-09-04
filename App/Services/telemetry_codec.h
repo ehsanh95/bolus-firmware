@@ -8,11 +8,12 @@
 
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V1       1U
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V2       2U
+#define BOLUS_TELEMETRY_PROTOCOL_VERSION_V21      3U
 #define BOLUS_TELEMETRY_MESSAGE_TYPE_SUMMARY      1U
 #define BOLUS_TELEMETRY_SUMMARY_V1_SIZE           24U
 #define BOLUS_TELEMETRY_SUMMARY_V2_SIZE           32U
+#define BOLUS_TELEMETRY_SUMMARY_V21_SIZE          40U
 
-/* Legacy V1 status bits. */
 #define BOLUS_TELEMETRY_STATUS_TEMP_VALID         (1U << 0)
 #define BOLUS_TELEMETRY_STATUS_MOTION_VALID       (1U << 1)
 #define BOLUS_TELEMETRY_STATUS_INTERVAL_VALID     (1U << 2)
@@ -21,7 +22,6 @@
 #define BOLUS_TELEMETRY_STATUS_HEALTH_DEGRADED    (1U << 5)
 #define BOLUS_TELEMETRY_STATUS_HEALTH_CRITICAL    (1U << 6)
 
-/* Episode-aware V2 status bits. */
 #define BOLUS_TELEMETRY_V2_STATUS_TEMP_VALID       (1U << 0)
 #define BOLUS_TELEMETRY_V2_STATUS_MOTION_VALID     (1U << 1)
 #define BOLUS_TELEMETRY_V2_STATUS_INTERVAL_VALID   (1U << 2)
@@ -31,6 +31,8 @@
 #define BOLUS_TELEMETRY_V2_STATUS_HEALTH_CRITICAL  (1U << 6)
 #define BOLUS_TELEMETRY_V2_STATUS_STAGING_UNTESTED (1U << 7)
 
+#define BOLUS_TELEMETRY_V21_STATUS_BMA456_VALID    (1U << 7)
+
 typedef enum
 {
     TELEMETRY_CODEC_OK = 0,
@@ -38,46 +40,29 @@ typedef enum
     TELEMETRY_CODEC_ERROR_BUFFER
 } telemetry_codec_status_t;
 
-/* Legacy fixed 24-byte summary, retained for compatibility. */
 telemetry_codec_status_t TelemetryCodec_EncodeSummaryV1(
     const bolus_telemetry_summary_v1_t *summary,
     uint8_t *payload,
     size_t payload_capacity,
     size_t *payload_size);
 
-/*
- * Episode-aware compact V2 wire layout, 32 bytes total:
- *   0      protocol-version[7:4] | message-type[3:0]
- *   1..2   sequence
- *   3      config version, saturated to 255
- *   4      V2 status/validity bitmap
- *   5      battery percent
- *   6..7   battery mV
- *   8..9   current temperature, centi-C
- *   10..11 minimum temperature, centi-C
- *   12..13 maximum temperature, centi-C
- *   14..15 maximum negative temperature excursion, centi-C signed
- *   16     episodes started in the 15-minute window
- *   17     accepted motion pulses
- *   18     pulses suppressed by retrigger guard
- *   19     maximum accepted pulses observed in one episode
- *   20     mean inter-pulse interval, seconds
- *   21     inter-pulse interval standard deviation, seconds
- *   22     successful MPU burst count
- *   23     mean MPU dynamic-acceleration RMS / 20 mg
- *   24     MPU peak dynamic acceleration / 20 mg
- *   25     mean MPU angular-velocity RMS / 10 dps
- *   26     MPU peak angular velocity / 10 dps
- *   27     max orientation change / 2 degrees
- *   28     total angular motion / 5 degrees
- *   29     contraction-candidate count (reserved until classifier connected)
- *   30     rotation-candidate count (reserved until classifier connected)
- *   31     low 8 bits of combined event/reference flags
- *
- * This payload intentionally transmits compact features, never raw waveforms.
- * STAGING NOTE: V2 is untested on hardware/build as of 2026-08-30.
- */
 telemetry_codec_status_t TelemetryCodec_EncodeSummaryV2(
+    const bolus_telemetry_summary_v2_t *summary,
+    uint8_t *payload,
+    size_t payload_capacity,
+    size_t *payload_size);
+
+/*
+ * Extended payload preserving all V2 fields and appending native BMA456 data.
+ * No MPU6050 data is used for these fields.
+ *
+ * Additional bytes:
+ * 32..35 bma456 step counter
+ * 36..37 bma456 accel X mg
+ * 38..39 bma456 accel Y mg
+ * 40..41 bma456 accel Z mg
+ */
+telemetry_codec_status_t TelemetryCodec_EncodeSummaryV21(
     const bolus_telemetry_summary_v2_t *summary,
     uint8_t *payload,
     size_t payload_capacity,
