@@ -11,14 +11,18 @@
 
 /*
  * ============================================================
- * [UNTESTED] LoRaWAN uplink + downlink integration staging
+ * [UNTESTED] LoRaWAN ABP uplink + downlink integration staging
  * ============================================================
- * This file has not yet passed a clean CubeIDE build or an OTAA/gateway test.
+ * The I-CUBE-LRWAN stack in this repository is configured for EU868,
+ * Class A and LoRaWAN 1.0.3 crypto. No OTAA join request is issued here.
+ * Gateway/TTN validation is still required after this change.
+ *
  * Downlink command acceptance must not be interpreted as live hardware apply;
  * see downlink_management_diag.pending_apply_mask.
  */
 
-#define LORAWAN_UPLINK_BUSY_RETRY_MS  100UL
+#define LORAWAN_UPLINK_BUSY_RETRY_MS       100UL
+#define LORAWAN_ABP_LRWAN_VERSION_V103     0x01000300UL
 
 typedef struct
 {
@@ -54,16 +58,15 @@ static uint8_t s_control_response[DOWNLINK_MANAGEMENT_RESPONSE_SIZE] = {0};
 
 static bool s_initialized = false;
 static bool s_joined = false;
-static bool s_join_in_flight = false;
 static bool s_tx_in_flight = false;
 static lorawan_tx_kind_t s_tx_kind = LORAWAN_TX_KIND_NONE;
 static uint32_t s_next_action_tick_ms = 0U;
 static uint32_t s_retry_delay_ms = 2000U;
 static uint8_t s_max_tx_attempts = 3U;
 
-static uint8_t s_dev_eui[8] = BOLUS_LORAWAN_DEV_EUI_BYTES;
-static uint8_t s_join_eui[8] = BOLUS_LORAWAN_JOIN_EUI_BYTES;
-static uint8_t s_root_key[16] = BOLUS_LORAWAN_ROOT_KEY_BYTES;
+static uint8_t s_f_nwk_s_int_key[16] = BOLUS_LORAWAN_F_NWK_S_INT_KEY_BYTES;
+static uint8_t s_s_nwk_s_int_key[16] = BOLUS_LORAWAN_S_NWK_S_INT_KEY_BYTES;
+static uint8_t s_app_s_key[16] = BOLUS_LORAWAN_APP_S_KEY_BYTES;
 
 lorawan_uplink_diag_t lorawan_uplink_service_diag = {0};
 
@@ -142,6 +145,17 @@ static void MacProcessNotify(void)
     lorawan_uplink_service_diag.mac_process_pending = true;
 }
 
+static void MarkAbpSessionLost(uint32_t now_ms)
+{
+    s_joined = false;
+    lorawan_uplink_service_diag.joined = false;
+    lorawan_uplink_service_diag.abp_session_configured = false;
+    lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
+    s_next_action_tick_ms = now_ms;
+    lorawan_uplink_service_diag.next_action_tick_ms = now_ms;
+    FaultManager_Raise(BOLUS_FAULT_RF_COMM);
+}
+
 static void HandleControlResponseConfirm(McpsConfirm_t *confirm)
 {
     if (confirm->Status == LORAMAC_EVENT_INFO_STATUS_OK)
@@ -206,7 +220,7 @@ static void MacMcpsConfirm(McpsConfirm_t *confirm)
     if (entry == NULL)
     {
         lorawan_uplink_service_diag.state =
-            s_joined ? LORAWAN_UPLINK_STATE_JOINED_IDLE : LORAWAN_UPLINK_STATE_JOIN_WAIT;
+            s_joined ? LORAWAN_UPLINK_STATE_JOINED_IDLE : LORAWAN_UPLINK_STATE_ERROR;
         return;
     }
 
@@ -275,11 +289,6 @@ static void MacMcpsIndication(McpsIndication_t *indication, LoRaMacRxStatus_t *r
         return;
     }
 
-    /*
-     * Do not accept another config transaction until the previous ACK/NACK has
-     * left the priority control slot. The network server can safely retry the
-     * same transaction id later; duplicate handling is explicit in the parser.
-     */
     if (s_control_response_pending)
     {
         lorawan_uplink_service_diag.downlink_response_drop_count++;
@@ -309,33 +318,11 @@ static void MacMcpsIndication(McpsIndication_t *indication, LoRaMacRxStatus_t *r
 
 static void MacMlmeConfirm(MlmeConfirm_t *confirm)
 {
-    if ((confirm == NULL) || (confirm->MlmeRequest != MLME_JOIN))
-    {
-        return;
-    }
-
-    s_join_in_flight = false;
-    lorawan_uplink_service_diag.join_in_flight = false;
-    lorawan_uplink_service_diag.last_join_confirm_status = confirm->Status;
-
-    if (confirm->Status == LORAMAC_EVENT_INFO_STATUS_OK)
-    {
-        s_joined = true;
-        lorawan_uplink_service_diag.joined = true;
-        lorawan_uplink_service_diag.join_success_count++;
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOINED_IDLE;
-        s_next_action_tick_ms = HAL_GetTick();
-        (void)FaultManager_ClearFault(BOLUS_FAULT_RF_COMM);
-    }
-    else
-    {
-        s_joined = false;
-        lorawan_uplink_service_diag.joined = false;
-        lorawan_uplink_service_diag.join_failure_count++;
-        s_next_action_tick_ms = HAL_GetTick() + BOLUS_LORAWAN_JOIN_RETRY_MS;
-        lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOIN_WAIT;
-    }
+    /*
+     * ABP does not issue MLME_JOIN. Keep a valid callback because LoRaMAC
+     * requires all primitive callbacks to be installed.
+     */
+    (void)confirm;
 }
 
 static void MacMlmeIndication(MlmeIndication_t *indication, LoRaMacRxStatus_t *rx_status)
@@ -354,7 +341,7 @@ static LoRaMacStatus_t SetMib(Mib_t type, MibParam_t param)
     return LoRaMacMibSetRequestConfirm(&request);
 }
 
-static bool ConfigureMacPolicyAndCredentials(void)
+static bool ConfigureMacPolicy(void)
 {
     MibParam_t param;
     LoRaMacStatus_t status;
@@ -386,92 +373,103 @@ static bool ConfigureMacPolicyAndCredentials(void)
         return false;
     }
 
-#if (BOLUS_LORAWAN_CREDENTIALS_PROVISIONED != 0)
-    memset(&param, 0, sizeof(param));
-    param.DevEui = s_dev_eui;
-    status = SetMib(MIB_DEV_EUI, param);
-    if (status != LORAMAC_STATUS_OK)
-    {
-        lorawan_uplink_service_diag.last_mac_status = status;
-        return false;
-    }
-
-    memset(&param, 0, sizeof(param));
-    param.JoinEui = s_join_eui;
-    status = SetMib(MIB_JOIN_EUI, param);
-    if (status != LORAMAC_STATUS_OK)
-    {
-        lorawan_uplink_service_diag.last_mac_status = status;
-        return false;
-    }
-
-    memset(&param, 0, sizeof(param));
-    param.NwkKey = s_root_key;
-    status = SetMib(MIB_NWK_KEY, param);
-    if (status != LORAMAC_STATUS_OK)
-    {
-        lorawan_uplink_service_diag.last_mac_status = status;
-        return false;
-    }
-
-    memset(&param, 0, sizeof(param));
-    param.AppKey = s_root_key;
-    status = SetMib(MIB_APP_KEY, param);
-    if (status != LORAMAC_STATUS_OK)
-    {
-        lorawan_uplink_service_diag.last_mac_status = status;
-        return false;
-    }
-#endif
-
     return true;
 }
 
-static void TryJoin(uint32_t now_ms)
+static bool ConfigureAbpSession(void)
 {
-    MlmeReq_t request;
+    MibParam_t param;
     LoRaMacStatus_t status;
 
-    if (s_joined || s_join_in_flight)
+    lorawan_uplink_service_diag.abp_session_configure_count++;
+    lorawan_uplink_service_diag.activation_mode = ACTIVATION_TYPE_ABP;
+    lorawan_uplink_service_diag.abp_dev_addr = BOLUS_LORAWAN_DEV_ADDR;
+    lorawan_uplink_service_diag.abp_network_keys_match =
+        (memcmp(s_f_nwk_s_int_key,
+                s_s_nwk_s_int_key,
+                sizeof(s_f_nwk_s_int_key)) == 0);
+
+    /*
+     * This repository is built with USE_LRWAN_1_1_X_CRYPTO == 0 and
+     * LoRaWAN 1.0.3. In that mode LoRaMAC exposes one MIB_NWK_S_KEY.
+     * Reject a 1.1-style session with different F/S network keys instead of
+     * silently configuring an invalid session.
+     */
+    if (!lorawan_uplink_service_diag.abp_network_keys_match)
     {
-        return;
+        lorawan_uplink_service_diag.last_mac_status = LORAMAC_STATUS_PARAMETER_INVALID;
+        lorawan_uplink_service_diag.abp_session_configure_failure_count++;
+        return false;
     }
 
-    memset(&request, 0, sizeof(request));
-    request.Type = MLME_JOIN;
-    request.Req.Join.Datarate = (uint8_t)BOLUS_LORAWAN_JOIN_DATARATE;
+    memset(&param, 0, sizeof(param));
+    param.AbpLrWanVersion.Value = LORAWAN_ABP_LRWAN_VERSION_V103;
+    status = SetMib(MIB_ABP_LORAWAN_VERSION, param);
+    if (status != LORAMAC_STATUS_OK)
+    {
+        lorawan_uplink_service_diag.last_mac_status = status;
+        lorawan_uplink_service_diag.abp_session_configure_failure_count++;
+        return false;
+    }
 
-    status = LoRaMacMlmeRequest(&request);
+    memset(&param, 0, sizeof(param));
+    param.DevAddr = BOLUS_LORAWAN_DEV_ADDR;
+    status = SetMib(MIB_DEV_ADDR, param);
+    if (status != LORAMAC_STATUS_OK)
+    {
+        lorawan_uplink_service_diag.last_mac_status = status;
+        lorawan_uplink_service_diag.abp_session_configure_failure_count++;
+        return false;
+    }
+
+    memset(&param, 0, sizeof(param));
+    param.NwkSKey = s_f_nwk_s_int_key;
+    status = SetMib(MIB_NWK_S_KEY, param);
+    if (status != LORAMAC_STATUS_OK)
+    {
+        lorawan_uplink_service_diag.last_mac_status = status;
+        lorawan_uplink_service_diag.abp_session_configure_failure_count++;
+        return false;
+    }
+
+    memset(&param, 0, sizeof(param));
+    param.AppSKey = s_app_s_key;
+    status = SetMib(MIB_APP_S_KEY, param);
+    if (status != LORAMAC_STATUS_OK)
+    {
+        lorawan_uplink_service_diag.last_mac_status = status;
+        lorawan_uplink_service_diag.abp_session_configure_failure_count++;
+        return false;
+    }
+
+    lorawan_uplink_service_diag.abp_session_configured = true;
+    lorawan_uplink_service_diag.last_mac_status = LORAMAC_STATUS_OK;
+    return true;
+}
+
+static bool ActivateAbpSession(void)
+{
+    MibParam_t param;
+    LoRaMacStatus_t status;
+
+    memset(&param, 0, sizeof(param));
+    param.NetworkActivation = ACTIVATION_TYPE_ABP;
+    status = SetMib(MIB_NETWORK_ACTIVATION, param);
     lorawan_uplink_service_diag.last_mac_status = status;
+    if (status != LORAMAC_STATUS_OK)
+    {
+        lorawan_uplink_service_diag.abp_session_configure_failure_count++;
+        return false;
+    }
 
-    if (status == LORAMAC_STATUS_OK)
-    {
-        s_join_in_flight = true;
-        lorawan_uplink_service_diag.join_in_flight = true;
-        lorawan_uplink_service_diag.join_request_count++;
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOINING;
-    }
-    else if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED)
-    {
-        s_next_action_tick_ms = now_ms + request.ReqReturn.DutyCycleWaitTime;
-        lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
-        lorawan_uplink_service_diag.duty_cycle_defer_count++;
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOIN_WAIT;
-    }
-    else if (status == LORAMAC_STATUS_BUSY)
-    {
-        s_next_action_tick_ms = now_ms + LORAWAN_UPLINK_BUSY_RETRY_MS;
-        lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
-        lorawan_uplink_service_diag.mac_busy_defer_count++;
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOIN_WAIT;
-    }
-    else
-    {
-        s_next_action_tick_ms = now_ms + BOLUS_LORAWAN_JOIN_RETRY_MS;
-        lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
-        lorawan_uplink_service_diag.join_failure_count++;
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOIN_WAIT;
-    }
+    s_joined = true;
+    lorawan_uplink_service_diag.joined = true;
+    lorawan_uplink_service_diag.join_in_flight = false;
+    lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOINED_IDLE;
+    s_next_action_tick_ms = HAL_GetTick();
+    lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
+    (void)FaultManager_ClearFault(BOLUS_FAULT_RF_COMM);
+    return true;
 }
 
 static void TrySendControlResponse(uint32_t now_ms)
@@ -519,10 +517,7 @@ static void TrySendControlResponse(uint32_t now_ms)
     }
     else if (status == LORAMAC_STATUS_NO_NETWORK_JOINED)
     {
-        s_joined = false;
-        lorawan_uplink_service_diag.joined = false;
-        s_next_action_tick_ms = now_ms;
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOIN_WAIT;
+        MarkAbpSessionLost(now_ms);
     }
     else
     {
@@ -604,10 +599,7 @@ static void TrySendHead(uint32_t now_ms)
     }
     else if (status == LORAMAC_STATUS_NO_NETWORK_JOINED)
     {
-        s_joined = false;
-        lorawan_uplink_service_diag.joined = false;
-        s_next_action_tick_ms = now_ms;
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOIN_WAIT;
+        MarkAbpSessionLost(now_ms);
     }
     else
     {
@@ -646,6 +638,7 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
     memset(s_queue, 0, sizeof(s_queue));
     memset(&lorawan_uplink_service_diag, 0, sizeof(lorawan_uplink_service_diag));
     memset(s_control_response, 0, sizeof(s_control_response));
+    s_initialized = false;
     s_queue_head = 0U;
     s_queue_tail = 0U;
     s_queue_count = 0U;
@@ -653,7 +646,6 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
     s_control_response_size = 0U;
     s_control_response_attempts = 0U;
     s_joined = false;
-    s_join_in_flight = false;
     s_tx_in_flight = false;
     s_tx_kind = LORAWAN_TX_KIND_NONE;
     s_next_action_tick_ms = HAL_GetTick();
@@ -662,6 +654,8 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
 
     lorawan_uplink_service_diag.credentials_provisioned =
         (BOLUS_LORAWAN_CREDENTIALS_PROVISIONED != 0);
+    lorawan_uplink_service_diag.activation_mode = ACTIVATION_TYPE_ABP;
+    lorawan_uplink_service_diag.abp_dev_addr = BOLUS_LORAWAN_DEV_ADDR;
     lorawan_uplink_service_diag.queue_capacity = BOLUS_LORAWAN_QUEUE_DEPTH;
     lorawan_uplink_service_diag.app_port = BOLUS_LORAWAN_APP_PORT;
 
@@ -698,7 +692,15 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
         return LORAWAN_UPLINK_ERROR_MAC_INIT;
     }
 
-    if (!ConfigureMacPolicyAndCredentials())
+    if (!ConfigureMacPolicy())
+    {
+        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
+        FaultManager_Raise(BOLUS_FAULT_RF_COMM);
+        return LORAWAN_UPLINK_ERROR_MIB;
+    }
+
+    if (lorawan_uplink_service_diag.credentials_provisioned &&
+        !ConfigureAbpSession())
     {
         lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
         FaultManager_Raise(BOLUS_FAULT_RF_COMM);
@@ -714,15 +716,19 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
         return LORAWAN_UPLINK_ERROR_MAC_START;
     }
 
+    if (lorawan_uplink_service_diag.credentials_provisioned &&
+        !ActivateAbpSession())
+    {
+        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
+        FaultManager_Raise(BOLUS_FAULT_RF_COMM);
+        return LORAWAN_UPLINK_ERROR_MIB;
+    }
+
     s_initialized = true;
     lorawan_uplink_service_diag.initialized = true;
     lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
 
-    if (lorawan_uplink_service_diag.credentials_provisioned)
-    {
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOIN_WAIT;
-    }
-    else
+    if (!lorawan_uplink_service_diag.credentials_provisioned)
     {
         lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_WAIT_CREDENTIALS;
     }
@@ -788,14 +794,14 @@ void LoRaWanUplinkService_Process(uint32_t now_ms)
         return;
     }
 
-    if (!TimeReached(now_ms, s_next_action_tick_ms))
+    if (!s_joined || !lorawan_uplink_service_diag.abp_session_configured)
     {
+        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
         return;
     }
 
-    if (!s_joined)
+    if (!TimeReached(now_ms, s_next_action_tick_ms))
     {
-        TryJoin(now_ms);
         return;
     }
 
