@@ -98,6 +98,14 @@ static void WriteI16Le(uint8_t *destination, int16_t value)
     WriteU16Le(destination, (uint16_t)value);
 }
 
+static void WriteU32Le(uint8_t *destination, uint32_t value)
+{
+    destination[0] = (uint8_t)(value & 0xFFU);
+    destination[1] = (uint8_t)((value >> 8) & 0xFFU);
+    destination[2] = (uint8_t)((value >> 16) & 0xFFU);
+    destination[3] = (uint8_t)((value >> 24) & 0xFFU);
+}
+
 telemetry_codec_status_t TelemetryCodec_EncodeSummaryV1(
     const bolus_telemetry_summary_v1_t *summary,
     uint8_t *payload,
@@ -314,5 +322,65 @@ telemetry_codec_status_t TelemetryCodec_EncodeSummaryV2(
     payload[31] = (uint8_t)(summary->combined_event_flags & 0xFFU);
 
     *payload_size = BOLUS_TELEMETRY_SUMMARY_V2_SIZE;
+    return TELEMETRY_CODEC_OK;
+}
+
+telemetry_codec_status_t TelemetryCodec_EncodeSummaryV2_1(
+    const bolus_telemetry_summary_v2_1_t *summary,
+    uint8_t *payload,
+    size_t payload_capacity,
+    size_t *payload_size)
+{
+    telemetry_codec_status_t status;
+    size_t v2_payload_size = 0U;
+
+    if ((summary == NULL) || (payload == NULL) || (payload_size == NULL))
+    {
+        return TELEMETRY_CODEC_ERROR_PARAM;
+    }
+
+    *payload_size = 0U;
+
+    if (payload_capacity < BOLUS_TELEMETRY_SUMMARY_V2_1_SIZE)
+    {
+        return TELEMETRY_CODEC_ERROR_BUFFER;
+    }
+
+    /*
+     * Reuse the frozen V2 encoder so bytes 1..31 stay bit-for-bit compatible
+     * with the existing wire contract. V2.1 changes only the version nibble
+     * and appends the native BMA456 snapshot.
+     */
+    status = TelemetryCodec_EncodeSummaryV2(
+        &summary->v2,
+        payload,
+        payload_capacity,
+        &v2_payload_size);
+
+    if (status != TELEMETRY_CODEC_OK)
+    {
+        return status;
+    }
+
+    if (v2_payload_size != BOLUS_TELEMETRY_SUMMARY_V2_SIZE)
+    {
+        return TELEMETRY_CODEC_ERROR_BUFFER;
+    }
+
+    payload[0] = (uint8_t)(
+        ((BOLUS_TELEMETRY_PROTOCOL_VERSION_V2_1 & 0x0FU) << 4) |
+        (BOLUS_TELEMETRY_MESSAGE_TYPE_SUMMARY & 0x0FU));
+
+    memset(
+        &payload[BOLUS_TELEMETRY_SUMMARY_V2_SIZE],
+        0,
+        BOLUS_TELEMETRY_SUMMARY_V2_1_SIZE - BOLUS_TELEMETRY_SUMMARY_V2_SIZE);
+
+    WriteU32Le(&payload[32], summary->bma_step_count);
+    WriteI16Le(&payload[36], summary->bma_accel_x_mg);
+    WriteI16Le(&payload[38], summary->bma_accel_y_mg);
+    WriteI16Le(&payload[40], summary->bma_accel_z_mg);
+
+    *payload_size = BOLUS_TELEMETRY_SUMMARY_V2_1_SIZE;
     return TELEMETRY_CODEC_OK;
 }

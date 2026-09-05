@@ -87,7 +87,7 @@ bool rfm95w_final_ok = false;
 radio_tx_service_status_t radio_tx_service_init_status = RADIO_TX_SERVICE_ERROR_NOT_READY;
 radio_tx_service_status_t radio_tx_service_submit_status = RADIO_TX_SERVICE_ERROR_NOT_READY;
 bool radio_tx_service_ready = false;
-uint32_t telemetry_payload_v2_queued_count = 0U;
+uint32_t telemetry_payload_v2_1_queued_count = 0U;
 
 /* BMA456 raw SPI Phase 4 regression diagnostics. */
 uint8_t bma456_first_read = 0U;
@@ -157,12 +157,12 @@ uint16_t event_episode_last_mpu_orientation_change_cdeg = 0U;
 /* 15-minute telemetry snapshot and encoding diagnostics. */
 telemetry_window_service_t telemetry_window_service = {0};
 telemetry_window_status_t telemetry_window_status = TELEMETRY_WINDOW_ERROR_CONFIG;
-bolus_telemetry_summary_v2_t telemetry_frozen_summary_v2 = {0};
+bolus_telemetry_summary_v2_1_t telemetry_frozen_summary_v2_1 = {0};
 telemetry_codec_status_t telemetry_codec_status = TELEMETRY_CODEC_ERROR_PARAM;
-uint8_t telemetry_payload_v2[BOLUS_TELEMETRY_SUMMARY_V2_SIZE] = {0};
-size_t telemetry_payload_v2_size = 0U;
+uint8_t telemetry_payload_v2_1[BOLUS_TELEMETRY_SUMMARY_V2_1_SIZE] = {0};
+size_t telemetry_payload_v2_1_size = 0U;
 bool telemetry_window_ready = false;
-bool telemetry_payload_v2_ready = false;
+bool telemetry_payload_v2_1_ready = false;
 uint32_t telemetry_snapshot_count = 0U;
 uint32_t telemetry_snapshot_failure_count = 0U;
 uint16_t telemetry_last_battery_mv = 0U;
@@ -441,6 +441,17 @@ int main(void)
       bma456_service_read_status = SensorService_ReadBmaSample(&bma456_service_sample);
       bma456_service_last_read_tick = HAL_GetTick();
 
+      if ((bma456_service_read_status == SENSOR_SERVICE_OK) &&
+          telemetry_window_ready)
+      {
+          TelemetryWindow_RecordBma456(
+              &telemetry_window_service,
+              bma456_service_sample.step_total,
+              bma456_service_sample.x_mg,
+              bma456_service_sample.y_mg,
+              bma456_service_sample.z_mg);
+      }
+
       bma_event_service_init_status =
           BmaEventService_Init(&hspi2, &sensor_service_config);
       bma_event_service_ready =
@@ -601,6 +612,17 @@ int main(void)
     {
         bma456_service_last_read_tick = HAL_GetTick();
         bma456_service_read_status = SensorService_ReadBmaSample(&bma456_service_sample);
+
+        if ((bma456_service_read_status == SENSOR_SERVICE_OK) &&
+            telemetry_window_ready)
+        {
+            TelemetryWindow_RecordBma456(
+                &telemetry_window_service,
+                bma456_service_sample.step_total,
+                bma456_service_sample.x_mg,
+                bma456_service_sample.y_mg,
+                bma456_service_sample.z_mg);
+        }
     }
 
     if (tmp_service_ready &&
@@ -620,7 +642,7 @@ int main(void)
 
     /*
      * At every 15-minute boundary take the final measurements, freeze the
-     * window and encode Telemetry V2. Unlike the previous staging version, the
+     * window and encode Telemetry V2.1. Unlike the previous staging version, the
      * packet is then copied into RadioTxService-owned RAM before transmission.
      */
     if (telemetry_window_ready &&
@@ -631,7 +653,7 @@ int main(void)
         bolus_health_status_t health;
         bool fault_present;
 
-        telemetry_payload_v2_ready = false;
+        telemetry_payload_v2_1_ready = false;
 
         if (tmp_service_ready)
         {
@@ -652,6 +674,16 @@ int main(void)
             bma456_service_read_status =
                 SensorService_ReadBmaSample(&bma456_service_sample);
             bma456_service_last_read_tick = HAL_GetTick();
+
+            if (bma456_service_read_status == SENSOR_SERVICE_OK)
+            {
+                TelemetryWindow_RecordBma456(
+                    &telemetry_window_service,
+                    bma456_service_sample.step_total,
+                    bma456_service_sample.x_mg,
+                    bma456_service_sample.y_mg,
+                    bma456_service_sample.z_mg);
+            }
         }
 
         battery_mv_status = Battery_ReadMillivolts(&telemetry_last_battery_mv);
@@ -672,7 +704,7 @@ int main(void)
         fault_present = (FaultManager_GetActiveMask() != 0U);
 
         telemetry_window_status =
-            TelemetryWindow_FreezeSummaryV2(
+            TelemetryWindow_FreezeSummaryV2_1(
                 &telemetry_window_service,
                 &sensor_service_config,
                 HAL_GetTick(),
@@ -681,20 +713,20 @@ int main(void)
                 fault_present,
                 (health == BOLUS_HEALTH_DEGRADED),
                 (health == BOLUS_HEALTH_CRITICAL),
-                &telemetry_frozen_summary_v2);
+                &telemetry_frozen_summary_v2_1);
 
         if (telemetry_window_status == TELEMETRY_WINDOW_OK)
         {
             telemetry_codec_status =
-                TelemetryCodec_EncodeSummaryV2(
-                    &telemetry_frozen_summary_v2,
-                    telemetry_payload_v2,
-                    sizeof(telemetry_payload_v2),
-                    &telemetry_payload_v2_size);
+                TelemetryCodec_EncodeSummaryV2_1(
+                    &telemetry_frozen_summary_v2_1,
+                    telemetry_payload_v2_1,
+                    sizeof(telemetry_payload_v2_1),
+                    &telemetry_payload_v2_1_size);
 
             if (telemetry_codec_status == TELEMETRY_CODEC_OK)
             {
-                telemetry_payload_v2_ready = true;
+                telemetry_payload_v2_1_ready = true;
                 telemetry_snapshot_count++;
             }
             else
@@ -710,24 +742,24 @@ int main(void)
 
     /*
      * Transfer ownership of a frozen/encoded packet to the TX service exactly
-     * once. If the TX service is busy, keep telemetry_payload_v2_ready=true and
+     * once. If the TX service is busy, keep telemetry_payload_v2_1_ready=true and
      * try again on a later loop; the source buffer is not modified meanwhile.
      */
     if (radio_tx_service_ready &&
-        telemetry_payload_v2_ready &&
-        (telemetry_payload_v2_size > 0U) &&
+        telemetry_payload_v2_1_ready &&
+        (telemetry_payload_v2_1_size > 0U) &&
         RadioTxService_CanAccept())
     {
         radio_tx_service_submit_status =
             RadioTxService_Submit(
-                telemetry_payload_v2,
-                (uint8_t)telemetry_payload_v2_size,
-                telemetry_frozen_summary_v2.sequence);
+                telemetry_payload_v2_1,
+                (uint8_t)telemetry_payload_v2_1_size,
+                telemetry_frozen_summary_v2_1.v2.sequence);
 
         if (radio_tx_service_submit_status == RADIO_TX_SERVICE_OK)
         {
-            telemetry_payload_v2_ready = false;
-            telemetry_payload_v2_queued_count++;
+            telemetry_payload_v2_1_ready = false;
+            telemetry_payload_v2_1_queued_count++;
         }
     }
 

@@ -87,6 +87,10 @@ void TelemetryWindow_RecordBma456(
     int16_t accel_y_mg,
     int16_t accel_z_mg);
 
+/*
+ * Freeze the legacy V2 summary and immediately roll into the next window.
+ * This API remains available so the 32-byte V2 path stays source-compatible.
+ */
 telemetry_window_status_t TelemetryWindow_FreezeSummaryV2(
     telemetry_window_service_t *service,
     const bolus_runtime_config_t *config,
@@ -97,5 +101,20 @@ telemetry_window_status_t TelemetryWindow_FreezeSummaryV2(
     bool health_degraded,
     bool health_critical,
     bolus_telemetry_summary_v2_t *summary);
+
+/*
+ * Freeze V2 plus the most recent successful native BMA456 sample, then roll
+ * into the next window. Radio transmission remains deliberately separate.
+ */
+telemetry_window_status_t TelemetryWindow_FreezeSummaryV2_1(
+    telemetry_window_service_t *service,
+    const bolus_runtime_config_t *config,
+    uint32_t now_ms,
+    uint16_t battery_mv,
+    uint8_t battery_percent,
+    bool fault_present,
+    bool health_degraded,
+    bool health_critical,
+    bolus_telemetry_summary_v2_1_t *summary);
 
 #endif /* TELEMETRY_WINDOW_SERVICE_H */

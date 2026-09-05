@@ -193,6 +193,25 @@ void TelemetryWindow_RecordMpuBurst(
     }
 }
 
+void TelemetryWindow_RecordBma456(
+    telemetry_window_service_t *service,
+    uint32_t step_count,
+    int16_t accel_x_mg,
+    int16_t accel_y_mg,
+    int16_t accel_z_mg)
+{
+    if ((service == NULL) || (!service->initialized))
+    {
+        return;
+    }
+
+    service->bma456_valid = true;
+    service->bma_step_count = step_count;
+    service->bma_accel_x_mg = accel_x_mg;
+    service->bma_accel_y_mg = accel_y_mg;
+    service->bma_accel_z_mg = accel_z_mg;
+}
+
 telemetry_window_status_t TelemetryWindow_FreezeSummaryV2(
     telemetry_window_service_t *service,
     const bolus_runtime_config_t *config,
@@ -304,5 +323,59 @@ telemetry_window_status_t TelemetryWindow_FreezeSummaryV2(
     summary->staging_untested = true;
 
     ResetWindowData(service, now_ms);
+    return TELEMETRY_WINDOW_OK;
+}
+
+telemetry_window_status_t TelemetryWindow_FreezeSummaryV2_1(
+    telemetry_window_service_t *service,
+    const bolus_runtime_config_t *config,
+    uint32_t now_ms,
+    uint16_t battery_mv,
+    uint8_t battery_percent,
+    bool fault_present,
+    bool health_degraded,
+    bool health_critical,
+    bolus_telemetry_summary_v2_1_t *summary)
+{
+    telemetry_window_status_t status;
+    uint32_t bma_step_count;
+    int16_t bma_accel_x_mg;
+    int16_t bma_accel_y_mg;
+    int16_t bma_accel_z_mg;
+
+    if ((service == NULL) || (config == NULL) || (summary == NULL))
+    {
+        return TELEMETRY_WINDOW_ERROR_PARAM;
+    }
+
+    memset(summary, 0, sizeof(*summary));
+
+    /* Save the BMA snapshot before the legacy freeze rolls the accumulator. */
+    bma_step_count = service->bma_step_count;
+    bma_accel_x_mg = service->bma_accel_x_mg;
+    bma_accel_y_mg = service->bma_accel_y_mg;
+    bma_accel_z_mg = service->bma_accel_z_mg;
+
+    status = TelemetryWindow_FreezeSummaryV2(
+        service,
+        config,
+        now_ms,
+        battery_mv,
+        battery_percent,
+        fault_present,
+        health_degraded,
+        health_critical,
+        &summary->v2);
+
+    if (status != TELEMETRY_WINDOW_OK)
+    {
+        return status;
+    }
+
+    summary->bma_step_count = bma_step_count;
+    summary->bma_accel_x_mg = bma_accel_x_mg;
+    summary->bma_accel_y_mg = bma_accel_y_mg;
+    summary->bma_accel_z_mg = bma_accel_z_mg;
+
     return TELEMETRY_WINDOW_OK;
 }

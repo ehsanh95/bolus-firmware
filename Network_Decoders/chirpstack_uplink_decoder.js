@@ -1,8 +1,9 @@
-// Bolus Telemetry V2 uplink decoder for ChirpStack v4 JavaScript codec.
+// Bolus Telemetry V2/V2.1 uplink decoder for ChirpStack v4 JavaScript codec.
 //
 // STATUS: DECODER IMPLEMENTED AND OFFLINE VECTOR-TESTED.
-// The 32-byte Telemetry V2 wire contract is frozen for decoder integration,
-// but the LoRaWAN transport path itself is still IMPLEMENTED / UNTESTED on
+// The 32-byte Telemetry V2 wire contract remains frozen and V2.1 appends a
+// native BMA456 snapshot without removing any V2 field. The LoRaWAN transport
+// path itself is still IMPLEMENTED / UNTESTED on
 // a real gateway/network server/hardware at this project checkpoint.
 //
 // Paste this complete file into the ChirpStack Device Profile codec:
@@ -11,12 +12,12 @@
 // ChirpStack provides input.bytes and input.fPort to decodeUplink(input).
 //
 // Bolus application uplinks:
-//   FPort 2: Telemetry V2 summary, exactly 32 bytes.
+//   FPort 2: Telemetry V2 (32 bytes) or V2.1 (42 bytes) summary.
 //   FPort 4: Downlink ACK/NACK control response, exactly 8 bytes.
 //   FPort 3: Reserved for application downlinks; it is not an uplink payload.
 //
 // Telemetry V2 byte 0 = high nibble protocol version, low nibble message type.
-// Current summary header is 0x21 (version 2, message type 1).
+// Summary headers are 0x21 for V2 and 0x31 for V2.1 (wire version 3).
 // Multi-byte values are little-endian. There is no application CRC in byte 31;
 // byte 31 is the low 8 bits of the event/reference flags.
 //
@@ -32,6 +33,13 @@ function bolusU16Le(bytes, offset) {
 function bolusI16Le(bytes, offset) {
   var value = bolusU16Le(bytes, offset);
   return (value & 0x8000) ? value - 0x10000 : value;
+}
+
+function bolusU32Le(bytes, offset) {
+  return (bytes[offset] |
+    (bytes[offset + 1] << 8) |
+    (bytes[offset + 2] << 16) |
+    (bytes[offset + 3] << 24)) >>> 0;
 }
 
 function bolusHex(value, width) {
@@ -71,6 +79,9 @@ function bolusDecodeTelemetryV2(bytes) {
         motion_valid: !!(status & 0x02),
         interval_valid: !!(status & 0x04),
         mpu_valid: !!(status & 0x08),
+        fault_present: !!(status & 0x10),
+        health_degraded: !!(status & 0x20),
+        health_critical: !!(status & 0x40),
         health_fault: !!(status & 0x40),
         staging_untested: !!(status & 0x80)
       },
@@ -122,6 +133,58 @@ function bolusDecodeTelemetryV2(bytes) {
       }
     }
   };
+}
+
+function bolusDecodeTelemetryV2_1(bytes) {
+  if (!bytes || bytes.length !== 42) {
+    return { error: 'Telemetry V2.1 must be exactly 42 bytes.' };
+  }
+
+  var version = (bytes[0] >> 4) & 0x0F;
+  var messageType = bytes[0] & 0x0F;
+  if (version !== 3) {
+    return { error: 'Unsupported Telemetry V2.1 wire version: ' + version + '.' };
+  }
+  if (messageType !== 1) {
+    return { error: 'Unsupported Telemetry V2.1 message type: ' + messageType + '.' };
+  }
+
+  /* Decode bytes 1..31 through the unchanged V2 path. */
+  var v2Prefix = bytes.slice(0, 32);
+  v2Prefix[0] = 0x21;
+  var decoded = bolusDecodeTelemetryV2(v2Prefix);
+  if (decoded.error) {
+    return decoded;
+  }
+
+  decoded.data.version = 'V2.1';
+  decoded.data.protocol.version = version;
+  decoded.data.protocol.version_name = 'V2.1';
+  decoded.data.protocol.message_name = 'summary_v2_1';
+  decoded.data.protocol.payload_size_bytes = 42;
+  decoded.data.bma = {
+    steps: bolusU32Le(bytes, 32),
+    accel_x_mg: bolusI16Le(bytes, 36),
+    accel_y_mg: bolusI16Le(bytes, 38),
+    accel_z_mg: bolusI16Le(bytes, 40)
+  };
+
+  return decoded;
+}
+
+function bolusDecodeTelemetry(bytes) {
+  if (!bytes || bytes.length === 0) {
+    return { error: 'Telemetry payload is empty.' };
+  }
+
+  var version = (bytes[0] >> 4) & 0x0F;
+  if (version === 2) {
+    return bolusDecodeTelemetryV2(bytes);
+  }
+  if (version === 3) {
+    return bolusDecodeTelemetryV2_1(bytes);
+  }
+  return { error: 'Unsupported telemetry version: ' + version + '.' };
 }
 
 function bolusControlResultName(code) {
@@ -182,12 +245,12 @@ function bolusDecodeControlUplink(bytes) {
 
 function bolusDecodeUplink(fPort, bytes) {
   if (fPort === 2) {
-    return bolusDecodeTelemetryV2(bytes);
+    return bolusDecodeTelemetry(bytes);
   }
   if (fPort === 4) {
     return bolusDecodeControlUplink(bytes);
   }
-  return { error: 'Unsupported Bolus uplink FPort: ' + fPort + '. Expected FPort 2 (Telemetry V2) or FPort 4 (ACK/NACK).' };
+  return { error: 'Unsupported Bolus uplink FPort: ' + fPort + '. Expected FPort 2 (Telemetry V2/V2.1) or FPort 4 (ACK/NACK).' };
 }
 
 // ChirpStack calls this function for every application uplink.
