@@ -117,4 +117,18 @@ telemetry_window_status_t TelemetryWindow_FreezeSummaryV2_1(
     bool health_critical,
     bolus_telemetry_summary_v2_1_t *summary);
 
+/*
+ * Freeze the compact V2.2 source snapshot. The active path reads battery mV
+ * only; percentage remains a backend concern.
+ */
+telemetry_window_status_t TelemetryWindow_FreezeSummaryV2_2(
+    telemetry_window_service_t *service,
+    const bolus_runtime_config_t *config,
+    uint32_t now_ms,
+    uint16_t battery_mv,
+    bool fault_present,
+    bool health_degraded,
+    bool health_critical,
+    bolus_telemetry_summary_v2_2_t *summary);
+
 #endif /* TELEMETRY_WINDOW_SERVICE_H */

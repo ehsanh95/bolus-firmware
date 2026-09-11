@@ -1,4 +1,4 @@
-// Bolus Telemetry V2/V2.1 uplink decoder for The Things Stack / TTN.
+// Bolus Telemetry V2/V2.1/V2.2 uplink decoder for The Things Stack / TTN.
 //
 // STATUS: DECODER IMPLEMENTED AND OFFLINE VECTOR-TESTED.
 // The 32-byte Telemetry V2 wire contract remains frozen and V2.1 appends a
@@ -10,17 +10,17 @@
 // Application (or End Device) -> Payload formatters -> Uplink -> JavaScript.
 //
 // Bolus application uplinks:
-//   FPort 2: Telemetry V2 (32 bytes) or V2.1 (42 bytes) summary.
+//   FPort 2: Telemetry V2 (32B), V2.1 (42B), or compact V2.2 (38B) summary.
 //   FPort 4: Downlink ACK/NACK control response, exactly 8 bytes.
 //   FPort 3: Reserved for application downlinks; it is not an uplink payload.
 //
 // Telemetry V2 byte 0 = high nibble protocol version, low nibble message type.
-// Summary headers are 0x21 for V2 and 0x31 for V2.1 (wire version 3).
-// Multi-byte values are little-endian. There is no application CRC in byte 31;
-// byte 31 is the low 8 bits of the event/reference flags.
+// Summary headers are 0x21 for V2, 0x31 for V2.1, and 0x41 for V2.2.
+// Multi-byte values are little-endian. In legacy V2/V2.1 there is no
+// application CRC in byte 31; that byte holds event/reference flags.
 //
-// Candidate counts and event-reference flags are staging/research fields. They
-// must not be interpreted as validated physiological diagnoses.
+// Legacy candidate counts and event-reference flags are staging/research
+// fields. V2.2 omits them.
 
 'use strict';
 
@@ -170,6 +170,81 @@ function bolusDecodeTelemetryV2_1(bytes) {
   return decoded;
 }
 
+function bolusDecodeTelemetryV2_2(bytes) {
+  if (!bytes || bytes.length !== 38) {
+    return { error: 'Telemetry V2.2 must be exactly 38 bytes.' };
+  }
+
+  var version = (bytes[0] >> 4) & 0x0F;
+  var messageType = bytes[0] & 0x0F;
+  if (version !== 4) {
+    return { error: 'Unsupported Telemetry V2.2 wire version: ' + version + '.' };
+  }
+  if (messageType !== 1) {
+    return { error: 'Unsupported Telemetry V2.2 message type: ' + messageType + '.' };
+  }
+
+  var status = bytes[4];
+
+  return {
+    data: {
+      version: 'V2.2',
+      protocol: {
+        version: version,
+        version_name: 'V2.2',
+        message_type: messageType,
+        message_name: 'summary_v2_2',
+        payload_size_bytes: 38,
+        sequence: bolusU16Le(bytes, 1),
+        runtime_config_version: bytes[3]
+      },
+      status: {
+        raw: bolusHex(status, 2),
+        temperature_valid: !!(status & 0x01),
+        motion_valid: !!(status & 0x02),
+        interval_valid: !!(status & 0x04),
+        mpu_valid: !!(status & 0x08),
+        fault_present: !!(status & 0x10),
+        health_degraded: !!(status & 0x20),
+        health_critical: !!(status & 0x40),
+        staging_untested: !!(status & 0x80)
+      },
+      battery: {
+        voltage_mv: bolusU16Le(bytes, 5)
+      },
+      temperature: {
+        current_c: bolusI16Le(bytes, 7) / 100,
+        min_c: bolusI16Le(bytes, 9) / 100,
+        max_c: bolusI16Le(bytes, 11) / 100,
+        max_negative_excursion_c: bolusI16Le(bytes, 13) / 100
+      },
+      episode: {
+        count: bytes[15],
+        accepted_pulse_count: bytes[16],
+        suppressed_pulse_count: bytes[17],
+        max_pulses_per_episode: bytes[18],
+        mean_inter_pulse_interval_s: bytes[19],
+        std_inter_pulse_interval_s: bytes[20]
+      },
+      mpu: {
+        successful_burst_count: bytes[21],
+        mean_dynamic_accel_rms_mg: bytes[22] * 20,
+        peak_dynamic_accel_mg: bytes[23] * 20,
+        mean_angular_velocity_rms_dps: bytes[24] * 10,
+        peak_angular_velocity_dps: bytes[25] * 10,
+        max_orientation_change_deg: bytes[26] * 2,
+        total_angular_motion_deg: bytes[27] * 5
+      },
+      bma: {
+        steps: bolusU32Le(bytes, 28),
+        accel_x_mg: bolusI16Le(bytes, 32),
+        accel_y_mg: bolusI16Le(bytes, 34),
+        accel_z_mg: bolusI16Le(bytes, 36)
+      }
+    }
+  };
+}
+
 function bolusDecodeTelemetry(bytes) {
   if (!bytes || bytes.length === 0) {
     return { error: 'Telemetry payload is empty.' };
@@ -181,6 +256,9 @@ function bolusDecodeTelemetry(bytes) {
   }
   if (version === 3) {
     return bolusDecodeTelemetryV2_1(bytes);
+  }
+  if (version === 4) {
+    return bolusDecodeTelemetryV2_2(bytes);
   }
   return { error: 'Unsupported telemetry version: ' + version + '.' };
 }
@@ -248,7 +326,7 @@ function bolusDecodeUplink(fPort, bytes) {
   if (fPort === 4) {
     return bolusDecodeControlUplink(bytes);
   }
-  return { error: 'Unsupported Bolus uplink FPort: ' + fPort + '. Expected FPort 2 (Telemetry V2/V2.1) or FPort 4 (ACK/NACK).' };
+  return { error: 'Unsupported Bolus uplink FPort: ' + fPort + '. Expected FPort 2 (Telemetry V2/V2.1/V2.2) or FPort 4 (ACK/NACK).' };
 }
 
 // The Things Stack calls this function for every application uplink.

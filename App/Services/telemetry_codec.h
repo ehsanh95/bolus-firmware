@@ -9,10 +9,12 @@
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V1       1U
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V2       2U
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V2_1     3U
+#define BOLUS_TELEMETRY_PROTOCOL_VERSION_V2_2     4U
 #define BOLUS_TELEMETRY_MESSAGE_TYPE_SUMMARY      1U
 #define BOLUS_TELEMETRY_SUMMARY_V1_SIZE           24U
 #define BOLUS_TELEMETRY_SUMMARY_V2_SIZE           32U
 #define BOLUS_TELEMETRY_SUMMARY_V2_1_SIZE         42U
+#define BOLUS_TELEMETRY_SUMMARY_V2_2_SIZE         38U
 
 /* Legacy V1 status bits. */
 #define BOLUS_TELEMETRY_STATUS_TEMP_VALID         (1U << 0)
@@ -23,7 +25,7 @@
 #define BOLUS_TELEMETRY_STATUS_HEALTH_DEGRADED    (1U << 5)
 #define BOLUS_TELEMETRY_STATUS_HEALTH_CRITICAL    (1U << 6)
 
-/* Episode-aware V2/V2.1 status bits. */
+/* Episode-aware V2/V2.1/V2.2 status bits. */
 #define BOLUS_TELEMETRY_V2_STATUS_TEMP_VALID       (1U << 0)
 #define BOLUS_TELEMETRY_V2_STATUS_MOTION_VALID     (1U << 1)
 #define BOLUS_TELEMETRY_V2_STATUS_INTERVAL_VALID   (1U << 2)
@@ -100,6 +102,29 @@ telemetry_codec_status_t TelemetryCodec_EncodeSummaryV2(
  */
 telemetry_codec_status_t TelemetryCodec_EncodeSummaryV2_1(
     const bolus_telemetry_summary_v2_1_t *summary,
+    uint8_t *payload,
+    size_t payload_capacity,
+    size_t *payload_size);
+
+/*
+ * Telemetry V2.2 compact wire layout, 38 bytes total:
+ *   0      protocol-version[7:4] | message-type[3:0] = 0x41
+ *   1..2   sequence, unsigned little-endian
+ *   3      config version, saturated to 255
+ *   4      V2 status/validity bitmap
+ *   5..6   battery mV, unsigned little-endian
+ *   7..14  current/min/max/negative-excursion temperatures, centi-C
+ *   15..20 episode and inter-pulse fields
+ *   21..27 MPU burst fields with the same quantization as V2/V2.1
+ *   28..31 BMA456 Step Counter, unsigned little-endian
+ *   32..37 BMA456 X/Y/Z acceleration, signed mg little-endian
+ *
+ * Battery percentage is intentionally derived by the backend, not sampled or
+ * transmitted by the active firmware path. Unconnected classifier candidate
+ * counts and reference flags are also absent. V2 and V2.1 remain frozen.
+ */
+telemetry_codec_status_t TelemetryCodec_EncodeSummaryV2_2(
+    const bolus_telemetry_summary_v2_2_t *summary,
     uint8_t *payload,
     size_t payload_capacity,
     size_t *payload_size);

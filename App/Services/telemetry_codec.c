@@ -384,3 +384,120 @@ telemetry_codec_status_t TelemetryCodec_EncodeSummaryV2_1(
     *payload_size = BOLUS_TELEMETRY_SUMMARY_V2_1_SIZE;
     return TELEMETRY_CODEC_OK;
 }
+
+telemetry_codec_status_t TelemetryCodec_EncodeSummaryV2_2(
+    const bolus_telemetry_summary_v2_2_t *summary,
+    uint8_t *payload,
+    size_t payload_capacity,
+    size_t *payload_size)
+{
+    const bolus_telemetry_summary_v2_t *v2;
+    uint8_t status = 0U;
+    uint8_t interval_std_s = 0U;
+
+    if ((summary == NULL) || (payload == NULL) || (payload_size == NULL))
+    {
+        return TELEMETRY_CODEC_ERROR_PARAM;
+    }
+
+    *payload_size = 0U;
+
+    if (payload_capacity < BOLUS_TELEMETRY_SUMMARY_V2_2_SIZE)
+    {
+        return TELEMETRY_CODEC_ERROR_BUFFER;
+    }
+
+    memset(payload, 0, BOLUS_TELEMETRY_SUMMARY_V2_2_SIZE);
+    v2 = &summary->v2;
+
+    if (v2->temperature_valid)
+    {
+        status |= BOLUS_TELEMETRY_V2_STATUS_TEMP_VALID;
+    }
+
+    if (v2->motion_valid)
+    {
+        status |= BOLUS_TELEMETRY_V2_STATUS_MOTION_VALID;
+    }
+
+    if (v2->inter_pulse_interval_valid)
+    {
+        status |= BOLUS_TELEMETRY_V2_STATUS_INTERVAL_VALID;
+        interval_std_s = SaturateU8(
+            IntegerSqrtU32(v2->inter_pulse_interval_variance_s2));
+    }
+
+    if (v2->mpu_valid)
+    {
+        status |= BOLUS_TELEMETRY_V2_STATUS_MPU_VALID;
+    }
+
+    if (v2->fault_present)
+    {
+        status |= BOLUS_TELEMETRY_V2_STATUS_FAULT_PRESENT;
+    }
+
+    if (v2->health_degraded)
+    {
+        status |= BOLUS_TELEMETRY_V2_STATUS_HEALTH_DEGRADED;
+    }
+
+    if (v2->health_critical)
+    {
+        status |= BOLUS_TELEMETRY_V2_STATUS_HEALTH_CRITICAL;
+    }
+
+    if (v2->staging_untested)
+    {
+        status |= BOLUS_TELEMETRY_V2_STATUS_STAGING_UNTESTED;
+    }
+
+    payload[0] = (uint8_t)(
+        ((BOLUS_TELEMETRY_PROTOCOL_VERSION_V2_2 & 0x0FU) << 4) |
+        (BOLUS_TELEMETRY_MESSAGE_TYPE_SUMMARY & 0x0FU));
+    WriteU16Le(&payload[1], v2->sequence);
+    payload[3] = SaturateU8(v2->config_version);
+    payload[4] = status;
+    WriteU16Le(&payload[5], v2->battery_mv);
+
+    if (v2->temperature_valid)
+    {
+        WriteI16Le(&payload[7], MdegCToCentiC(v2->temperature_current_mdeg_c));
+        WriteI16Le(&payload[9], MdegCToCentiC(v2->temperature_min_mdeg_c));
+        WriteI16Le(&payload[11], MdegCToCentiC(v2->temperature_max_mdeg_c));
+        WriteI16Le(&payload[13], MdegCToCentiC(v2->max_negative_excursion_mdeg_c));
+    }
+
+    if (v2->motion_valid)
+    {
+        payload[15] = SaturateU8(v2->episode_count);
+        payload[16] = SaturateU8(v2->accepted_pulse_count);
+        payload[17] = SaturateU8(v2->suppressed_pulse_count);
+        payload[18] = SaturateU8(v2->max_pulses_per_episode);
+    }
+
+    if (v2->inter_pulse_interval_valid)
+    {
+        payload[19] = SaturateU8(v2->inter_pulse_interval_mean_s);
+        payload[20] = interval_std_s;
+    }
+
+    if (v2->mpu_valid)
+    {
+        payload[21] = SaturateU8(v2->mpu_burst_count);
+        payload[22] = QuantizeAccel20Mg(v2->rms_dynamic_accel_mg);
+        payload[23] = QuantizeAccel20Mg(v2->peak_dynamic_accel_mg);
+        payload[24] = QuantizeDps10(v2->rms_angular_velocity_dps);
+        payload[25] = QuantizeDps10(v2->peak_angular_velocity_dps);
+        payload[26] = QuantizeOrientation2Deg(v2->max_orientation_change_cdeg);
+        payload[27] = QuantizeAngularMotion5Deg(v2->total_angular_motion_cdeg);
+    }
+
+    WriteU32Le(&payload[28], summary->bma_step_count);
+    WriteI16Le(&payload[32], summary->bma_accel_x_mg);
+    WriteI16Le(&payload[34], summary->bma_accel_y_mg);
+    WriteI16Le(&payload[36], summary->bma_accel_z_mg);
+
+    *payload_size = BOLUS_TELEMETRY_SUMMARY_V2_2_SIZE;
+    return TELEMETRY_CODEC_OK;
+}

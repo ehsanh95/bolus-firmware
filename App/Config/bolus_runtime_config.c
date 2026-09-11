@@ -106,7 +106,7 @@ void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config)
      * Version-11 managed TX defaults:
      * - each frozen packet gets at most 3 total attempts;
      * - failed attempts wait 2 s before retry;
-     * - the SX1276 driver gets a 3 s TX timeout, enough for the current 32-byte
+     * - the SX1276 driver gets a 3 s TX timeout, enough for the current 38-byte
      *   payload across the allowed staging SF range while remaining bounded.
      */
     config->radio.tx_timeout_ms = 3000U;

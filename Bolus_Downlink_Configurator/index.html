@@ -305,9 +305,9 @@ footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.
   <header class="hero">
     <div class="eyebrow">Bolus Firmware Tools</div>
     <h1>Payload Toolkit</h1>
-    <p>Build configuration downlinks and decode Bolus Telemetry V2 or control-response uplinks from one offline interface.</p>
+    <p>Build configuration downlinks and decode Bolus Telemetry V2/V2.1/V2.2 or control-response uplinks from one offline interface.</p>
     <div class="port-strip">
-      <div class="port-chip"><strong>FPort 2</strong><span>Telemetry V2 uplink</span></div>
+      <div class="port-chip"><strong>FPort 2</strong><span>Telemetry uplink</span></div>
       <div class="port-chip"><strong>FPort 3</strong><span>Configuration downlink</span></div>
       <div class="port-chip"><strong>FPort 4</strong><span>ACK/NACK uplink</span></div>
     </div>
@@ -315,7 +315,7 @@ footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.
 
   <div class="notice">
     <div class="notice-icon">!</div>
-    <div><strong>Staging boundary.</strong> The payload contracts and this offline toolkit are implemented. Telemetry V2 is frozen for decoder integration, but LoRaWAN end-to-end transport, gateway delivery, live RF apply, and hardware/network validation are still pending. Local payload generation or decoding is not an RF PASS.</div>
+    <div><strong>Staging boundary.</strong> The payload contracts and this offline toolkit are implemented. Legacy Telemetry V2/V2.1 are frozen and compact V2.2 is active, but LoRaWAN end-to-end transport, gateway delivery, live RF apply, and hardware/network validation are still pending. Local payload generation or decoding is not an RF PASS.</div>
   </div>
 
   <div class="workspace">
@@ -405,7 +405,7 @@ footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.
           <div class="step">2</div>
           <div>
             <h2>Uplink Decoder</h2>
-            <p>Decode the exact firmware wire contract: Telemetry V2 on FPort 2 or configuration ACK/NACK on FPort 4.</p>
+            <p>Decode the exact firmware wire contract: Telemetry V2/V2.1/V2.2 on FPort 2 or configuration ACK/NACK on FPort 4.</p>
           </div>
         </div>
       </div>
@@ -413,7 +413,7 @@ footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.
       <div class="panel-body">
         <div class="decoder-controls">
           <label>Uplink FPort
-            <select id="uplinkPort"><option value="2">2 — Telemetry V2</option><option value="4">4 — ACK/NACK response</option></select>
+            <select id="uplinkPort"><option value="2">2 — Telemetry</option><option value="4">4 — ACK/NACK response</option></select>
           </label>
           <label>Input encoding
             <select id="uplinkEncoding"><option value="hex">HEX</option><option value="base64">Base64</option></select>
@@ -421,7 +421,7 @@ footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.
           <div class="test-actions"><button class="ghost" id="loadTelemetryExample">Telemetry Test Vector</button><button class="ghost" id="loadAckExample">ACK Test Vector</button></div>
         </div>
 
-        <div id="uplinkStatus" class="status info">Telemetry V2 must be exactly 32 bytes. ACK/NACK must be exactly 8 bytes.</div>
+        <div id="uplinkStatus" class="status info">Telemetry V2/V2.1/V2.2 uses 32/42/38 bytes. ACK/NACK must be exactly 8 bytes.</div>
 
         <div class="decoder-grid">
           <div class="io-card">
@@ -437,20 +437,20 @@ footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.
         </div>
 
         <details class="details">
-          <summary>Telemetry V2 quick map</summary>
+          <summary>Active Telemetry V2.2 quick map</summary>
           <table class="protocol-table">
             <thead><tr><th>Bytes</th><th>Field</th></tr></thead>
             <tbody>
-              <tr><td>0</td><td>Version/message header: current summary = <code>0x21</code></td></tr>
+              <tr><td>0</td><td>Version/message header: current summary = <code>0x41</code></td></tr>
               <tr><td>1–2</td><td>Sequence, little-endian</td></tr>
               <tr><td>3</td><td>RuntimeConfig version</td></tr>
               <tr><td>4</td><td>Status/validity flags</td></tr>
-              <tr><td>5–7</td><td>Battery % and mV</td></tr>
-              <tr><td>8–15</td><td>Temperature current/min/max/negative excursion</td></tr>
-              <tr><td>16–22</td><td>Episode, pulse, inter-pulse, MPU burst counts</td></tr>
-              <tr><td>23–28</td><td>Quantized MPU features</td></tr>
-              <tr><td>29–30</td><td>Reserved classifier candidate counts</td></tr>
-              <tr><td>31</td><td>Event/reference flags — not CRC</td></tr>
+              <tr><td>5–6</td><td>Battery voltage in mV</td></tr>
+              <tr><td>7–14</td><td>Temperature current/min/max/negative excursion</td></tr>
+              <tr><td>15–21</td><td>Episode, pulse, inter-pulse, MPU burst counts</td></tr>
+              <tr><td>22–27</td><td>Quantized MPU features</td></tr>
+              <tr><td>28–31</td><td>BMA456 Step Counter</td></tr>
+              <tr><td>32–37</td><td>BMA456 XYZ acceleration in mg</td></tr>
             </tbody>
           </table>
         </details>
@@ -487,10 +487,11 @@ function bytesToSpacedHex(bytes){return bytes.map(b=>b.toString(16).padStart(2,'
 document.getElementById('generate').addEventListener('click',()=>{const txid=Number(document.getElementById('txid').value),keys=selectedKeys(),errors=validateBuilder(txid,keys);if(errors.length){setBuilderStatus(errors.join('\n'),'err');return;}const bytes=[0xD1,0x01,txid,keys.length];keys.forEach(key=>{const def=CMD[key],valueBytes=encodeValue(def.type,document.getElementById(key).value);bytes.push(def.id,valueBytes.length,...valueBytes);});const spaced=bytesToSpacedHex(bytes),compact=spaced.replaceAll(' ','');document.getElementById('hexSpaced').value=spaced;document.getElementById('hexCompact').value=compact;document.getElementById('base64').value=bytesToBase64(bytes);setBuilderStatus(`Payload ready. FPort=3 | ${bytes.length} bytes | ${keys.length} command(s)\nRF commands remain PENDING_APPLY / UNTESTED in firmware.`,'ok');localStorage.setItem('bolusLastTxId',String(txid));});
 
 // -----------------------------------------------------------------------------
-// Telemetry V2 + control uplink decoder (FPort 2 / FPort 4)
+// Telemetry V2/V2.1/V2.2 + control uplink decoder (FPort 2 / FPort 4)
 // -----------------------------------------------------------------------------
 function u16le(bytes,offset){return (bytes[offset]|(bytes[offset+1]<<8))>>>0;}
 function i16le(bytes,offset){const value=u16le(bytes,offset);return (value&0x8000)?value-0x10000:value;}
+function u32le(bytes,offset){return (bytes[offset]|(bytes[offset+1]<<8)|(bytes[offset+2]<<16)|(bytes[offset+3]<<24))>>>0;}
 function hexValue(value,width){return '0x'+(value>>>0).toString(16).toUpperCase().padStart(width,'0');}
 
 function decodeTelemetryV2(bytes){
@@ -511,6 +512,47 @@ function decodeTelemetryV2(bytes){
   };
 }
 
+function decodeTelemetryV2_1(bytes){
+  if(bytes.length!==42)throw new Error(`Telemetry V2.1 must be exactly 42 bytes; received ${bytes.length}.`);
+  const version=(bytes[0]>>4)&0x0F,messageType=bytes[0]&0x0F;
+  if(version!==3)throw new Error(`Unsupported Telemetry V2.1 wire version ${version}; expected 3.`);
+  if(messageType!==1)throw new Error(`Unsupported Telemetry V2.1 message type ${messageType}; expected summary type 1.`);
+  const v2Bytes=bytes.slice(0,32);v2Bytes[0]=0x21;
+  const decoded=decodeTelemetryV2(v2Bytes);
+  decoded.protocol.version=version;
+  decoded.protocol.version_name='V2.1';
+  decoded.protocol.message_name='summary_v2_1';
+  decoded.protocol.payload_size_bytes=42;
+  decoded.bma={steps:u32le(bytes,32),accel_x_mg:i16le(bytes,36),accel_y_mg:i16le(bytes,38),accel_z_mg:i16le(bytes,40)};
+  return decoded;
+}
+
+function decodeTelemetryV2_2(bytes){
+  if(bytes.length!==38)throw new Error(`Telemetry V2.2 must be exactly 38 bytes; received ${bytes.length}.`);
+  const version=(bytes[0]>>4)&0x0F,messageType=bytes[0]&0x0F;
+  if(version!==4)throw new Error(`Unsupported Telemetry V2.2 wire version ${version}; expected 4.`);
+  if(messageType!==1)throw new Error(`Unsupported Telemetry V2.2 message type ${messageType}; expected summary type 1.`);
+  const status=bytes[4];
+  return {
+    protocol:{version,version_name:'V2.2',message_type:messageType,message_name:'summary_v2_2',payload_size_bytes:38,sequence:u16le(bytes,1),runtime_config_version:bytes[3]},
+    status:{raw:hexValue(status,2),temperature_valid:!!(status&0x01),motion_valid:!!(status&0x02),interval_valid:!!(status&0x04),mpu_valid:!!(status&0x08),fault_present:!!(status&0x10),health_degraded:!!(status&0x20),health_critical:!!(status&0x40),staging_untested:!!(status&0x80)},
+    battery:{voltage_mv:u16le(bytes,5)},
+    temperature:{current_c:i16le(bytes,7)/100,min_c:i16le(bytes,9)/100,max_c:i16le(bytes,11)/100,max_negative_excursion_c:i16le(bytes,13)/100},
+    episode:{count:bytes[15],accepted_pulse_count:bytes[16],suppressed_pulse_count:bytes[17],max_pulses_per_episode:bytes[18],mean_inter_pulse_interval_s:bytes[19],std_inter_pulse_interval_s:bytes[20]},
+    mpu:{successful_burst_count:bytes[21],mean_dynamic_accel_rms_mg:bytes[22]*20,peak_dynamic_accel_mg:bytes[23]*20,mean_angular_velocity_rms_dps:bytes[24]*10,peak_angular_velocity_dps:bytes[25]*10,max_orientation_change_deg:bytes[26]*2,total_angular_motion_deg:bytes[27]*5},
+    bma:{steps:u32le(bytes,28),accel_x_mg:i16le(bytes,32),accel_y_mg:i16le(bytes,34),accel_z_mg:i16le(bytes,36)}
+  };
+}
+
+function decodeTelemetry(bytes){
+  if(!bytes.length)throw new Error('Telemetry payload is empty.');
+  const version=(bytes[0]>>4)&0x0F;
+  if(version===2)return decodeTelemetryV2(bytes);
+  if(version===3)return decodeTelemetryV2_1(bytes);
+  if(version===4)return decodeTelemetryV2_2(bytes);
+  throw new Error(`Unsupported telemetry version ${version}.`);
+}
+
 const resultNames={0x00:'ACCEPTED_PENDING_APPLY',0x01:'ACCEPTED_NO_LIVE_RECONFIG',0x02:'DUPLICATE_TRANSACTION',0x80:'ERROR_PARAM',0x81:'ERROR_MAGIC',0x82:'ERROR_VERSION',0x83:'ERROR_LENGTH',0x84:'ERROR_COMMAND',0x85:'ERROR_VALUE',0x86:'ERROR_CONFIG',0x87:'ERROR_NOT_INITIALIZED'};
 const maskNames=[[0,'BMA_EVENT'],[1,'BMA_SENSOR'],[2,'EVENT_EPISODE'],[3,'MPU_SENSOR'],[4,'TELEMETRY_WINDOW'],[5,'RADIO_POLICY']];
 function decodeControlUplink(bytes){
@@ -523,10 +565,10 @@ function decodeControlUplink(bytes){
 
 function readUplinkBytes(){const value=document.getElementById('uplinkInput').value;return document.getElementById('uplinkEncoding').value==='hex'?parseHex(value):base64ToBytes(value);}
 function setUplinkStatus(text,kind){const el=document.getElementById('uplinkStatus');el.className=`status ${kind}`;el.textContent=text;}
-document.getElementById('decodeUplinkBtn').addEventListener('click',()=>{try{const port=Number(document.getElementById('uplinkPort').value),bytes=readUplinkBytes();const decoded=port===2?decodeTelemetryV2(bytes):port===4?decodeControlUplink(bytes):(()=>{throw new Error(`Unsupported uplink FPort ${port}.`);})();document.getElementById('uplinkJson').value=JSON.stringify(decoded,null,2);setUplinkStatus(`Decoded successfully. FPort=${port} | ${bytes.length} bytes. Local decode success does not imply LoRaWAN hardware/network validation.`,'ok');}catch(e){document.getElementById('uplinkJson').value='';setUplinkStatus(e.message,'err');}});
-document.getElementById('clearUplink').addEventListener('click',()=>{document.getElementById('uplinkInput').value='';document.getElementById('uplinkJson').value='';setUplinkStatus('Telemetry V2 must be exactly 32 bytes. ACK/NACK must be exactly 8 bytes.','info');});
+document.getElementById('decodeUplinkBtn').addEventListener('click',()=>{try{const port=Number(document.getElementById('uplinkPort').value),bytes=readUplinkBytes();const decoded=port===2?decodeTelemetry(bytes):port===4?decodeControlUplink(bytes):(()=>{throw new Error(`Unsupported uplink FPort ${port}.`);})();document.getElementById('uplinkJson').value=JSON.stringify(decoded,null,2);setUplinkStatus(`Decoded successfully. FPort=${port} | ${bytes.length} bytes. Local decode success does not imply LoRaWAN hardware/network validation.`,'ok');}catch(e){document.getElementById('uplinkJson').value='';setUplinkStatus(e.message,'err');}});
+document.getElementById('clearUplink').addEventListener('click',()=>{document.getElementById('uplinkInput').value='';document.getElementById('uplinkJson').value='';setUplinkStatus('Telemetry V2/V2.1/V2.2 uses 32/42/38 bytes. ACK/NACK must be exactly 8 bytes.','info');});
 
-const telemetryTestVector=[0x21,0x34,0x12,0x0B,0x8F,87,0x74,0x0E,0x55,0x0F,0x0A,0x0F,0x87,0x0F,0x83,0xFF,2,5,1,3,48,7,5,10,30,12,40,8,20,0,0,0x05];
+const telemetryTestVector=[0x41,0x10,0x00,0x0B,0x8F,0xF8,0x0C,0x8D,0x09,0x8C,0x09,0x94,0x09,0xFA,0xFF,1,3,8,3,2,0,3,59,95,46,77,0,63,0,0,0,0,0xCF,0,0x3A,0xFF,0xBC,0x03];
 const ackTestVector=[0xD2,0x01,0x2A,0x00,0x20,0x00,0x0B,0x00];
 function loadVector(port,bytes){document.getElementById('uplinkPort').value=String(port);document.getElementById('uplinkEncoding').value='hex';document.getElementById('uplinkInput').value=bytesToSpacedHex(bytes);document.getElementById('uplinkJson').value='';setUplinkStatus('Test vector loaded. Press Decode Uplink.','info');}
 document.getElementById('loadTelemetryExample').addEventListener('click',()=>loadVector(2,telemetryTestVector));

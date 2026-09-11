@@ -7,7 +7,7 @@ Status: **IMPLEMENTED / OFFLINE TOOLING TESTED / LORAWAN END-TO-END UNTESTED**
 It now provides two functions in one fully English offline UI:
 
 1. **Downlink Builder** — creates configuration commands for LoRaWAN **FPort 3**.
-2. **Uplink Decoder** — decodes Telemetry V2 on **FPort 2** and downlink ACK/NACK responses on **FPort 4**.
+2. **Uplink Decoder** — decodes Telemetry V2/V2.1/V2.2 on **FPort 2** and downlink ACK/NACK responses on **FPort 4**.
 
 No installation, network connection, or device credentials are required.
 
@@ -22,31 +22,31 @@ No installation, network connection, or device credentials are required.
 
 | FPort | Direction | Purpose |
 |---:|---|---|
-| 2 | Bolus -> server | Telemetry V2 summary |
+| 2 | Bolus -> server | Telemetry V2/V2.1/V2.2 summary |
 | 3 | Server -> Bolus | Configuration downlink |
 | 4 | Bolus -> server | Configuration ACK/NACK |
 
-## Telemetry V2 decoder
+## Telemetry decoder
 
 The decoder follows the exact firmware encoder in `App/Services/telemetry_codec.c`.
 
-Current Telemetry V2 contract:
+Current active Telemetry V2.2 contract:
 
-- fixed size: **32 bytes**;
-- byte 0: version/message header, current summary = `0x21`;
+- fixed size: **38 bytes**;
+- byte 0: version/message header, current summary = `0x41`;
 - bytes 1-2: sequence, little-endian;
 - byte 3: RuntimeConfig version;
 - byte 4: status/validity flags;
-- bytes 5-7: battery percentage and mV;
-- bytes 8-15: current/min/max/negative-excursion temperature fields;
-- bytes 16-22: episode, pulse, interval, and MPU burst counters;
-- bytes 23-28: quantized MPU features;
-- bytes 29-30: reserved classifier candidate counters;
-- byte 31: low 8 bits of event/reference flags (**not CRC**).
+- bytes 5-6: battery voltage in mV;
+- bytes 7-14: current/min/max/negative-excursion temperature fields;
+- bytes 15-21: episode, pulse, interval, and MPU burst counters;
+- bytes 22-27: quantized MPU features;
+- bytes 28-31: native BMA456 Step Counter;
+- bytes 32-37: native BMA456 XYZ acceleration in mg.
 
-The UI expands quantized MPU fields into engineering units (mg, dps, degrees) and signed temperature values into degrees Celsius.
+The UI expands quantized MPU fields into engineering units (mg, dps, degrees) and signed temperature values into degrees Celsius. V2.2 reports one representation per measurement: battery voltage only in millivolts and temperature only in degrees Celsius.
 
-Candidate counters and event/reference flags are research/staging fields. They must not be interpreted as validated physiological diagnoses.
+Frozen V2 (32-byte) and V2.1 (42-byte) payloads remain supported for backward compatibility. Their legacy decoded shape is preserved.
 
 ## Downlink Builder
 
@@ -109,7 +109,7 @@ Ready-to-paste, commented JavaScript decoders are stored in:
 - `the_things_stack_uplink_decoder.js`
 - `chirpstack_uplink_decoder.js`
 
-Both decode FPort 2 Telemetry V2 and FPort 4 ACK/NACK using the same firmware wire contract.
+Both decode FPort 2 Telemetry V2/V2.1/V2.2 and FPort 4 ACK/NACK using the same firmware wire contract.
 
 ## Validation boundary
 

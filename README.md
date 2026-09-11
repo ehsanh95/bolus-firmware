@@ -39,7 +39,7 @@ flowchart LR
     BMA --> EP
 
     EP --> TW[TelemetryWindowService\n15-minute aggregation]
-    TW --> CODEC[Telemetry V2\n32-byte payload]
+    TW --> CODEC[Telemetry V2.2\n38-byte payload]
     CODEC --> LORA[LoRaWAN Class A\nEU868 / OTAA]
     LORA --> NET[Gateway / Network Server]
 
@@ -63,7 +63,7 @@ Episode aggregation
       ↓
 15-minute telemetry window
       ↓
-32-byte Telemetry V2
+38-byte Telemetry V2.2
       ↓
 LoRaWAN uplink
 ```
@@ -182,9 +182,9 @@ These timing values are engineering parameters intended for field calibration; t
 
 ---
 
-## Telemetry V2
+## Telemetry V2.2
 
-The firmware aggregates events into a compact fixed-size **32-byte Telemetry V2 packet**.
+The active firmware aggregates events into a compact fixed-size **38-byte Telemetry V2.2 packet**. Frozen V2 (32-byte) and V2.1 (42-byte) encoders remain available for compatibility, and all three versions remain supported by the network-server decoders.
 
 The normal radio path transports summaries/features, not raw motion waveforms.
 
@@ -199,45 +199,45 @@ The normal radio path transports summaries/features, not raw motion waveforms.
 - maximum negative temperature excursion;
 - successful MPU burst count;
 - mean/peak motion features;
-- battery voltage and estimated battery percentage;
+- battery voltage in millivolts;
 - validity / health state;
-- classifier placeholders and event flags.
+- native BMA456 Step Counter and XYZ acceleration snapshot.
 
 <details>
-<summary><strong>Telemetry V2 — exact 32-byte map</strong></summary>
+<summary><strong>Telemetry V2.2 — exact 38-byte map</strong></summary>
 
 | Byte(s) | Field |
 |---|---|
-| 0 | protocol v2 + message type |
+| 0 | protocol v2.2 + message type (`0x41`) |
 | 1–2 | sequence |
 | 3 | RuntimeConfig version |
 | 4 | validity / health / staging bitmap |
-| 5 | battery % |
-| 6–7 | battery mV |
-| 8–9 | current temperature, centi-°C |
-| 10–11 | minimum temperature, centi-°C |
-| 12–13 | maximum temperature, centi-°C |
-| 14–15 | signed maximum negative temperature excursion |
-| 16 | Episode count |
-| 17 | accepted pulse count |
-| 18 | guard-suppressed pulse count |
-| 19 | maximum pulses per Episode |
-| 20 | mean inter-pulse interval, seconds |
-| 21 | inter-pulse interval standard deviation, seconds |
-| 22 | successful MPU burst count |
-| 23 | mean MPU dynamic RMS / 20 mg |
-| 24 | peak dynamic acceleration / 20 mg |
-| 25 | mean angular-velocity RMS / 10 dps |
-| 26 | peak angular velocity / 10 dps |
-| 27 | maximum orientation change / 2° |
-| 28 | total angular motion / 5° |
-| 29 | contraction candidate count — reserved |
-| 30 | rotation candidate count — reserved |
-| 31 | low 8 bits of event/reference flags |
+| 5–6 | battery mV |
+| 7–8 | current temperature, centi-°C |
+| 9–10 | minimum temperature, centi-°C |
+| 11–12 | maximum temperature, centi-°C |
+| 13–14 | signed maximum negative temperature excursion, centi-°C |
+| 15 | Episode count |
+| 16 | accepted pulse count |
+| 17 | guard-suppressed pulse count |
+| 18 | maximum pulses per Episode |
+| 19 | mean inter-pulse interval, seconds |
+| 20 | inter-pulse interval standard deviation, seconds |
+| 21 | successful MPU burst count |
+| 22 | mean MPU dynamic RMS / 20 mg |
+| 23 | peak dynamic acceleration / 20 mg |
+| 24 | mean angular-velocity RMS / 10 dps |
+| 25 | peak angular velocity / 10 dps |
+| 26 | maximum orientation change / 2° |
+| 27 | total angular motion / 5° |
+| 28–31 | BMA456 Step Counter, uint32 little-endian |
+| 32–33 | BMA456 X acceleration, int16 little-endian mg |
+| 34–35 | BMA456 Y acceleration, int16 little-endian mg |
+| 36–37 | BMA456 Z acceleration, int16 little-endian mg |
 
 </details>
 
-> Classifier fields are currently reserved placeholders. The firmware does **not** yet claim validated classification of rumen contraction, rotation, drinking, disease, or animal behavior.
+> Battery percentage is derived by the backend when needed. V2.2 does not transmit the unconnected classifier counters or event/reference flags and does **not** claim validated classification of rumen contraction, rotation, drinking, disease, or animal behavior.
 
 ---
 
@@ -421,7 +421,7 @@ Power numbers should therefore be treated as future measurement targets, not as 
 | Episode retrigger guard | ✅ Controlled hardware observation | Suppressed pulse did not trigger TMP/MPU downstream |
 | TMP event acquisition | ✅ Initial hardware evidence | Event-driven samples observed |
 | MPU event burst | ✅ Initial hardware evidence | Burst counter and ~25-sample burst observed |
-| Telemetry V2 encoding | ✅ Initial hardware evidence | 32-byte payload preparation observed |
+| Telemetry V2.2 encoding | 🟡 Offline codec-tested | 38-byte compact payload; hardware/network validation required |
 | Numerical MPU feature quality | 🟡 Pending validation | Requires controlled motion/reference tests |
 | LoRaWAN build/integration | 🟡 IMPLEMENTED / UNTESTED | Clean build + hardware/network validation required |
 | OTAA join | 🟡 UNTESTED | Real credentials intentionally not committed |
@@ -432,7 +432,7 @@ Power numbers should therefore be treated as future measurement targets, not as 
 | RF live-apply mapping | 🟡 UNTESTED | Must be mapped correctly to EU868 LoRaMAC data-rate policy |
 | STOP2 + RTC/LPTIM | ⬜ Pending | Required for production power management |
 | Power characterization | ⬜ Pending | Requires real current measurements |
-| Event classifier | ⬜ Pending | Telemetry fields reserved; classifier not connected |
+| Event classifier | ⬜ Pending | Classifier not connected; counters are not transmitted in V2.2 |
 | Field/animal validation | ⬜ Pending | Required before physiological interpretation |
 
 ---
@@ -456,6 +456,8 @@ bolus-firmware/
 ├── Bolus_Downlink_Configurator/
 │   ├── index.html          # Offline downlink generator / ACK decoder
 │   └── README.md
+├── Network_Decoders/       # TTN and ChirpStack uplink decoders
+├── tests/                  # Host codec and decoder vector tests
 ├── tools/                  # Build/integration helper scripts
 └── Code.ioc                # STM32CubeMX project configuration
 ```
@@ -517,8 +519,8 @@ Likewise, motion/temperature parameters derived from literature or engineering i
 Sensor + Event Pipeline
         ✅
         ↓
-Telemetry V2
-        ✅ initial hardware evidence
+Telemetry V2.2
+        🟡 offline codec-tested
         ↓
 LoRaWAN Uplink
         🟡 implemented / untested
@@ -545,7 +547,7 @@ Classifier + Field Calibration
 
 This repository represents an **experimental engineering and research platform**.
 
-It is not a veterinary diagnostic device, and current thresholds, event rules, temperature references, telemetry classifier placeholders, and RF/power assumptions must not be interpreted as validated medical, physiological, or production claims without dedicated field validation.
+It is not a veterinary diagnostic device, and current thresholds, event rules, temperature references, future classifier outputs, and RF/power assumptions must not be interpreted as validated medical, physiological, or production claims without dedicated field validation.
 
 ---
 

@@ -379,3 +379,29 @@ telemetry_window_status_t TelemetryWindow_FreezeSummaryV2_1(
 
     return TELEMETRY_WINDOW_OK;
 }
+
+telemetry_window_status_t TelemetryWindow_FreezeSummaryV2_2(
+    telemetry_window_service_t *service,
+    const bolus_runtime_config_t *config,
+    uint32_t now_ms,
+    uint16_t battery_mv,
+    bool fault_present,
+    bool health_degraded,
+    bool health_critical,
+    bolus_telemetry_summary_v2_2_t *summary)
+{
+    /*
+     * Keep the established freeze/roll behavior and explicitly supply zero for
+     * the legacy-only percentage field. The V2.2 encoder never serializes it.
+     */
+    return TelemetryWindow_FreezeSummaryV2_1(
+        service,
+        config,
+        now_ms,
+        battery_mv,
+        0U,
+        fault_present,
+        health_degraded,
+        health_critical,
+        summary);
+}

@@ -16,7 +16,7 @@ The LoRaWAN uplink/downlink integration in this checkpoint is still **not build-
 - Application telemetry uplink: unconfirmed by default, FPort 2.
 - Configuration downlink staging: FPort 3.
 - ACK/NACK control uplink staging: FPort 4.
-- Telemetry packet: existing fixed 32-byte Telemetry V2 payload.
+- Telemetry packet: active fixed 38-byte compact Telemetry V2.2 payload; frozen V2/V2.1 formats remain decoder-compatible.
 - Queue: two copied application packets, so the next TelemetryWindow freeze cannot overwrite an in-flight packet.
 - Dedicated priority control-response slot for downlink ACK/NACK.
 - LoRaMAC owns frame construction, MIC, encryption, frame counters, duty-cycle scheduling and RX1/RX2 timing.

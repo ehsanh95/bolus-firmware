@@ -110,4 +110,11 @@ typedef struct
     int16_t bma_accel_z_mg;
 } bolus_telemetry_summary_v2_1_t;
 
+/*
+ * Telemetry V2.2 keeps the proven V2.1 internal snapshot so legacy V2/V2.1
+ * encoders remain available. Its wire encoder deliberately omits the derived
+ * battery percentage and the currently unconnected staging classifier fields.
+ */
+typedef bolus_telemetry_summary_v2_1_t bolus_telemetry_summary_v2_2_t;
+
 #endif /* TELEMETRY_DATA_H */
