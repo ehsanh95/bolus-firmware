@@ -19,6 +19,16 @@ volatile radio_tx_service_diag_t radio_tx_service_diag = {0};
 
 static bool s_ready = false;
 
+static bool ControlResponsePending(void)
+{
+    uint32_t completed_count =
+        lorawan_uplink_service_diag.downlink_response_tx_success_count +
+        lorawan_uplink_service_diag.downlink_response_drop_count;
+
+    return (lorawan_uplink_service_diag.downlink_response_queued_count >
+            completed_count);
+}
+
 void RadioTxService_AttachEvents(RadioEvents_t *events)
 {
     if (events == NULL)
@@ -98,16 +108,20 @@ radio_tx_service_status_t RadioTxService_Submit(
 
 void RadioTxService_Process(uint32_t now_ms)
 {
+    bool control_response_pending;
+
     if (!s_ready)
     {
         return;
     }
 
     LoRaWanUplinkService_Process(now_ms);
+    control_response_pending = ControlResponsePending();
 
     /* Mirror high-value LoRaWAN diagnostics into the old debugger structure. */
     radio_tx_service_diag.pending_valid =
-        (lorawan_uplink_service_diag.queue_count > 0U);
+        ((lorawan_uplink_service_diag.queue_count > 0U) ||
+         control_response_pending);
     radio_tx_service_diag.attempts_for_current =
         (uint8_t)lorawan_uplink_service_diag.tx_request_count;
     radio_tx_service_diag.tx_start_count =
@@ -129,7 +143,8 @@ void RadioTxService_Process(uint32_t now_ms)
     {
         radio_tx_service_diag.state = RADIO_TX_STATE_TX_RUNNING;
     }
-    else if (lorawan_uplink_service_diag.queue_count > 0U)
+    else if ((lorawan_uplink_service_diag.queue_count > 0U) ||
+             control_response_pending)
     {
         if (lorawan_uplink_service_diag.state == LORAWAN_UPLINK_STATE_RETRY_WAIT)
         {
@@ -171,5 +186,6 @@ bool RadioTxService_IsBusy(void)
 {
     return (s_ready &&
             (lorawan_uplink_service_diag.tx_in_flight ||
-             (lorawan_uplink_service_diag.queue_count > 0U)));
+             (lorawan_uplink_service_diag.queue_count > 0U) ||
+             ControlResponsePending()));
 }
