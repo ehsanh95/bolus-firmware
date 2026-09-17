@@ -46,7 +46,14 @@ extern "C" {
 
 /* Exported macro ------------------------------------------------------------*/
 /* USER CODE BEGIN EM */
-
+/*
+ * STM32L4 HAL names the 8-bit SPI data-size macro SPI_DATASIZE_8BIT.
+ * Keep this compatibility alias for Phase 6 low-power main.c so Cube/HAL
+ * version differences cannot break the build on this configuration.
+ */
+#ifndef SPI_DATASIZE_8B
+#define SPI_DATASIZE_8B SPI_DATASIZE_8BIT
+#endif
 /* USER CODE END EM */
 
 /* Exported functions prototypes ---------------------------------------------*/
