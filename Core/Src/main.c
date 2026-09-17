@@ -45,6 +45,41 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+/*
+ * STOP2 is intentionally entered in short watchdog-safe chunks. The IWDG and
+ * RTC are both clocked from LSI, so the wakeup margin remains large even when
+ * the absolute LSI frequency drifts. Application time is reconstructed from
+ * the RTC calendar after every wake so 15-minute/event deadlines continue to
+ * advance while SysTick is suspended.
+ */
+#define LOW_POWER_MAX_IDLE_MS                 20000UL
+#define LOW_POWER_DEADLINE_GUARD_MS             250UL
+#define LOW_POWER_MIN_STOP_MS                  1250UL
+
+#define LOW_POWER_RTC_BDCR_RTCSEL_MASK       (3UL << 8)
+#define LOW_POWER_RTC_BDCR_RTCSEL_LSI        (2UL << 8)
+#define LOW_POWER_RTC_BDCR_RTCEN             (1UL << 15)
+#define LOW_POWER_RTC_BDCR_BDRST             (1UL << 16)
+
+#define LOW_POWER_RTC_ISR_WUTWF              (1UL << 2)
+#define LOW_POWER_RTC_ISR_INITS              (1UL << 4)
+#define LOW_POWER_RTC_ISR_INITF              (1UL << 6)
+#define LOW_POWER_RTC_ISR_INIT               (1UL << 7)
+#define LOW_POWER_RTC_ISR_WUTF               (1UL << 10)
+
+#define LOW_POWER_RTC_CR_WUCKSEL_MASK        (7UL << 0)
+#define LOW_POWER_RTC_CR_WUCKSEL_CK_SPRE     (4UL << 0)
+#define LOW_POWER_RTC_CR_BYPSHAD             (1UL << 5)
+#define LOW_POWER_RTC_CR_WUTE                (1UL << 10)
+#define LOW_POWER_RTC_CR_WUTIE               (1UL << 14)
+
+#define LOW_POWER_RTC_EXTI_LINE              (1UL << 20)
+#define LOW_POWER_RTC_PREDIV_A               127UL
+#define LOW_POWER_RTC_PREDIV_S               249UL
+#define LOW_POWER_RTC_PRER_VALUE             ((LOW_POWER_RTC_PREDIV_A << 16) | LOW_POWER_RTC_PREDIV_S)
+#define LOW_POWER_RTC_VALID_DATE             0x00002101UL
+#define LOW_POWER_RTC_DAY_MS                 86400000UL
+#define LOW_POWER_WAIT_LIMIT                 1000000UL
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -166,6 +201,16 @@ bool telemetry_payload_v2_2_ready = false;
 uint32_t telemetry_snapshot_count = 0U;
 uint32_t telemetry_snapshot_failure_count = 0U;
 uint16_t telemetry_last_battery_mv = 0U;
+
+/* Phase 6 STOP2 diagnostics, intentionally debugger-visible. */
+bool low_power_rtc_ready = false;
+volatile uint32_t low_power_stop2_entry_count = 0U;
+volatile uint32_t low_power_rtc_wake_count = 0U;
+volatile uint32_t low_power_early_wake_count = 0U;
+volatile uint32_t low_power_last_sleep_ms = 0U;
+volatile uint32_t low_power_total_sleep_ms = 0U;
+volatile uint32_t low_power_reject_busy_count = 0U;
+static volatile bool s_low_power_rtc_irq_seen = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -179,6 +224,9 @@ static void MX_I2C3_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_IWDG_Init(void);
 /* USER CODE BEGIN PFP */
+static bool LowPower_RtcInit(void);
+static bool LowPower_TryEnterStop2(uint32_t idle_budget_ms);
+static uint32_t LowPower_ComputeIdleBudget(uint32_t now_ms);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -206,6 +254,344 @@ static HAL_StatusTypeDef BMA456_RawReadRegister(uint8_t reg, uint8_t *value)
     }
 
     return status;
+}
+
+static void LowPower_RtcUnlock(void)
+{
+    RTC->WPR = 0xCAU;
+    RTC->WPR = 0x53U;
+}
+
+static void LowPower_RtcLock(void)
+{
+    RTC->WPR = 0xFFU;
+}
+
+static bool LowPower_WaitRtcFlag(uint32_t mask, bool set)
+{
+    uint32_t timeout = LOW_POWER_WAIT_LIMIT;
+
+    while (timeout > 0U)
+    {
+        bool state = ((RTC->ISR & mask) != 0U);
+        if (state == set)
+        {
+            return true;
+        }
+        timeout--;
+    }
+
+    return false;
+}
+
+static bool LowPower_RtcInit(void)
+{
+    __HAL_RCC_PWR_CLK_ENABLE();
+    HAL_PWR_EnableBkUpAccess();
+
+    /* SystemClock_Config already enables LSI for IWDG. Select it for RTC too. */
+    if ((RCC->BDCR & LOW_POWER_RTC_BDCR_RTCSEL_MASK) !=
+        LOW_POWER_RTC_BDCR_RTCSEL_LSI)
+    {
+        RCC->BDCR |= LOW_POWER_RTC_BDCR_BDRST;
+        RCC->BDCR &= ~LOW_POWER_RTC_BDCR_BDRST;
+        RCC->BDCR =
+            (RCC->BDCR & ~LOW_POWER_RTC_BDCR_RTCSEL_MASK) |
+            LOW_POWER_RTC_BDCR_RTCSEL_LSI;
+    }
+
+    RCC->BDCR |= LOW_POWER_RTC_BDCR_RTCEN;
+
+    LowPower_RtcUnlock();
+
+    if ((RTC->ISR & LOW_POWER_RTC_ISR_INITS) == 0U)
+    {
+        RTC->ISR |= LOW_POWER_RTC_ISR_INIT;
+        if (!LowPower_WaitRtcFlag(LOW_POWER_RTC_ISR_INITF, true))
+        {
+            LowPower_RtcLock();
+            return false;
+        }
+
+        RTC->PRER = LOW_POWER_RTC_PRER_VALUE;
+        RTC->TR = 0U;
+        RTC->DR = LOW_POWER_RTC_VALID_DATE;
+        RTC->ISR &= ~LOW_POWER_RTC_ISR_INIT;
+    }
+
+    /* Direct coherent reads avoid a shadow-register synchronization dependency. */
+    RTC->CR |= LOW_POWER_RTC_CR_BYPSHAD;
+    LowPower_RtcLock();
+
+    EXTI->PR1 = LOW_POWER_RTC_EXTI_LINE;
+    EXTI->RTSR1 |= LOW_POWER_RTC_EXTI_LINE;
+    EXTI->FTSR1 &= ~LOW_POWER_RTC_EXTI_LINE;
+    EXTI->IMR1 |= LOW_POWER_RTC_EXTI_LINE;
+
+    HAL_NVIC_ClearPendingIRQ(RTC_WKUP_IRQn);
+    HAL_NVIC_SetPriority(RTC_WKUP_IRQn, 7U, 0U);
+    HAL_NVIC_EnableIRQ(RTC_WKUP_IRQn);
+
+    return true;
+}
+
+static uint32_t LowPower_RtcTimeOfDayMs(void)
+{
+    uint32_t tr_first;
+    uint32_t tr_second;
+    uint32_t ssr;
+    uint32_t hours;
+    uint32_t minutes;
+    uint32_t seconds;
+    uint32_t subsecond_ms;
+
+    do
+    {
+        tr_first = RTC->TR;
+        ssr = RTC->SSR;
+        tr_second = RTC->TR;
+    } while (tr_first != tr_second);
+
+    hours = (((tr_first >> 20) & 0x3U) * 10U) + ((tr_first >> 16) & 0xFU);
+    minutes = (((tr_first >> 12) & 0x7U) * 10U) + ((tr_first >> 8) & 0xFU);
+    seconds = (((tr_first >> 4) & 0x7U) * 10U) + (tr_first & 0xFU);
+
+    ssr &= 0x7FFFU;
+    if (ssr > LOW_POWER_RTC_PREDIV_S)
+    {
+        ssr = LOW_POWER_RTC_PREDIV_S;
+    }
+    subsecond_ms =
+        ((LOW_POWER_RTC_PREDIV_S - ssr) * 1000UL) /
+        (LOW_POWER_RTC_PREDIV_S + 1UL);
+
+    return (((hours * 60UL + minutes) * 60UL + seconds) * 1000UL) +
+           subsecond_ms;
+}
+
+static bool LowPower_ArmWakeup(uint32_t seconds)
+{
+    if ((seconds == 0U) || (seconds > 0xFFFFU))
+    {
+        return false;
+    }
+
+    LowPower_RtcUnlock();
+    RTC->CR &= ~(LOW_POWER_RTC_CR_WUTE | LOW_POWER_RTC_CR_WUTIE);
+
+    if (!LowPower_WaitRtcFlag(LOW_POWER_RTC_ISR_WUTWF, true))
+    {
+        LowPower_RtcLock();
+        return false;
+    }
+
+    RTC->ISR &= ~LOW_POWER_RTC_ISR_WUTF;
+    RTC->WUTR = seconds - 1U;
+    RTC->CR =
+        (RTC->CR & ~LOW_POWER_RTC_CR_WUCKSEL_MASK) |
+        LOW_POWER_RTC_CR_WUCKSEL_CK_SPRE;
+    RTC->CR |= (LOW_POWER_RTC_CR_WUTIE | LOW_POWER_RTC_CR_WUTE);
+    LowPower_RtcLock();
+
+    s_low_power_rtc_irq_seen = false;
+    EXTI->PR1 = LOW_POWER_RTC_EXTI_LINE;
+    HAL_NVIC_ClearPendingIRQ(RTC_WKUP_IRQn);
+    return true;
+}
+
+static void LowPower_DisarmWakeup(void)
+{
+    LowPower_RtcUnlock();
+    RTC->CR &= ~(LOW_POWER_RTC_CR_WUTE | LOW_POWER_RTC_CR_WUTIE);
+    (void)LowPower_WaitRtcFlag(LOW_POWER_RTC_ISR_WUTWF, true);
+    RTC->ISR &= ~LOW_POWER_RTC_ISR_WUTF;
+    LowPower_RtcLock();
+    EXTI->PR1 = LOW_POWER_RTC_EXTI_LINE;
+    HAL_NVIC_ClearPendingIRQ(RTC_WKUP_IRQn);
+}
+
+static uint32_t LowPower_TimeUntil(uint32_t now_ms, uint32_t deadline_ms)
+{
+    int32_t delta = (int32_t)(deadline_ms - now_ms);
+    return (delta > 0) ? (uint32_t)delta : 0U;
+}
+
+static void LowPower_TightenBudget(
+    uint32_t now_ms,
+    uint32_t deadline_ms,
+    uint32_t *budget_ms)
+{
+    uint32_t until_deadline;
+
+    if (budget_ms == NULL)
+    {
+        return;
+    }
+
+    until_deadline = LowPower_TimeUntil(now_ms, deadline_ms);
+    if (until_deadline < *budget_ms)
+    {
+        *budget_ms = until_deadline;
+    }
+}
+
+static uint32_t LowPower_ComputeIdleBudget(uint32_t now_ms)
+{
+    uint32_t budget_ms = LOW_POWER_MAX_IDLE_MS;
+
+    if (telemetry_window_ready)
+    {
+        LowPower_TightenBudget(
+            now_ms,
+            telemetry_window_service.window_start_ms +
+                telemetry_window_service.uplink_period_ms,
+            &budget_ms);
+    }
+
+    if (tmp_service_ready)
+    {
+        LowPower_TightenBudget(
+            now_ms,
+            tmp_service_last_read_tick +
+                (sensor_service_config.temperature.sample_period_s * 1000UL),
+            &budget_ms);
+    }
+
+    if (event_episode_ready && event_episode_service.active)
+    {
+        LowPower_TightenBudget(
+            now_ms,
+            event_episode_service.close_deadline_ms,
+            &budget_ms);
+
+        if (event_episode_service.followup_active)
+        {
+            LowPower_TightenBudget(
+                now_ms,
+                event_episode_service.next_followup_due_ms,
+                &budget_ms);
+        }
+    }
+
+    return budget_ms;
+}
+
+static bool LowPower_CanEnterStop2(void)
+{
+    if (!low_power_rtc_ready)
+    {
+        return false;
+    }
+
+    if (telemetry_payload_v2_2_ready)
+    {
+        return false;
+    }
+
+    if (radio_tx_service_ready && RadioTxService_IsBusy())
+    {
+        low_power_reject_busy_count++;
+        return false;
+    }
+
+    if (bma_event_service_ready &&
+        (bma_irq_diag_count != bma_event_service_processed_irq_count))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+static bool LowPower_TryEnterStop2(uint32_t idle_budget_ms)
+{
+    uint32_t sleep_seconds;
+    uint32_t rtc_before_ms;
+    uint32_t rtc_after_ms;
+    uint32_t elapsed_ms;
+    uint32_t tick_before;
+    uint32_t tick_advanced;
+
+    if (!LowPower_CanEnterStop2() ||
+        (idle_budget_ms < LOW_POWER_MIN_STOP_MS))
+    {
+        return false;
+    }
+
+    if (idle_budget_ms <= LOW_POWER_DEADLINE_GUARD_MS)
+    {
+        return false;
+    }
+
+    sleep_seconds =
+        (idle_budget_ms - LOW_POWER_DEADLINE_GUARD_MS) / 1000UL;
+    if (sleep_seconds == 0U)
+    {
+        return false;
+    }
+
+    rtc_before_ms = LowPower_RtcTimeOfDayMs();
+    if (!LowPower_ArmWakeup(sleep_seconds))
+    {
+        return false;
+    }
+
+    HAL_IWDG_Refresh(&hiwdg);
+    tick_before = uwTick;
+    HAL_SuspendTick();
+
+    low_power_stop2_entry_count++;
+    __DSB();
+    __ISB();
+    HAL_PWREx_EnterSTOP2Mode(PWR_STOPENTRY_WFI);
+
+    /* STOP2 disables the PLL/HSE system clock; restore it before normal work. */
+    SystemClock_Config();
+    rtc_after_ms = LowPower_RtcTimeOfDayMs();
+    LowPower_DisarmWakeup();
+
+    if (rtc_after_ms >= rtc_before_ms)
+    {
+        elapsed_ms = rtc_after_ms - rtc_before_ms;
+    }
+    else
+    {
+        elapsed_ms = (LOW_POWER_RTC_DAY_MS - rtc_before_ms) + rtc_after_ms;
+    }
+
+    /* HAL_RCC_ClockConfig may have restarted SysTick while restoring clocks. */
+    tick_advanced = uwTick - tick_before;
+    if (elapsed_ms > tick_advanced)
+    {
+        uwTick += (elapsed_ms - tick_advanced);
+    }
+
+    HAL_ResumeTick();
+    HAL_IWDG_Refresh(&hiwdg);
+
+    low_power_last_sleep_ms = elapsed_ms;
+    low_power_total_sleep_ms += elapsed_ms;
+    if (!s_low_power_rtc_irq_seen)
+    {
+        low_power_early_wake_count++;
+    }
+
+    return true;
+}
+
+/* RTC wakeup is intentionally lower priority than BMA and RFM DIO IRQs. */
+void RTC_WKUP_IRQHandler(void)
+{
+    if ((RTC->ISR & LOW_POWER_RTC_ISR_WUTF) != 0U)
+    {
+        LowPower_RtcUnlock();
+        RTC->ISR &= ~LOW_POWER_RTC_ISR_WUTF;
+        LowPower_RtcLock();
+        s_low_power_rtc_irq_seen = true;
+        low_power_rtc_wake_count++;
+    }
+
+    EXTI->PR1 = LOW_POWER_RTC_EXTI_LINE;
 }
 
 static void HandleEventEpisodeAction(const event_episode_action_t *action)
@@ -437,19 +823,12 @@ int main(void)
       ((bma456_service_init_status == SENSOR_SERVICE_OK) && SensorService_IsBmaReady());
   if (bma456_service_ready)
   {
-      bma456_service_read_status = SensorService_ReadBmaSample(&bma456_service_sample);
+      /*
+       * Do not poll Step/XYZ here or every 500 ms. BMA456 remains powered and
+       * counts steps/raises Any-Motion in hardware; its telemetry snapshot is
+       * read once, immediately before the 15-minute telemetry freeze.
+       */
       bma456_service_last_read_tick = HAL_GetTick();
-
-      if ((bma456_service_read_status == SENSOR_SERVICE_OK) &&
-          telemetry_window_ready)
-      {
-          TelemetryWindow_RecordBma456(
-              &telemetry_window_service,
-              bma456_service_sample.step_total,
-              bma456_service_sample.x_mg,
-              bma456_service_sample.y_mg,
-              bma456_service_sample.z_mg);
-      }
 
       bma_event_service_init_status =
           BmaEventService_Init(&hspi2, &sensor_service_config);
@@ -474,14 +853,10 @@ int main(void)
       }
   }
 
+  /* MPU6050 is configured once, then remains physically off until event burst. */
   mpu_service_init_status = SensorService_InitMpu(&hi2c1, &sensor_service_config);
   mpu_service_ready =
       ((mpu_service_init_status == SENSOR_SERVICE_OK) && SensorService_IsMpuReady());
-  if (mpu_service_ready)
-  {
-      mpu_service_read_status = SensorService_ReadMpuSample(&mpu_service_sample);
-      mpu_service_last_read_tick = HAL_GetTick();
-  }
 
   /*
    * RFM95W Phase-4 regression remains intact. Attach managed TX callbacks before
@@ -537,6 +912,8 @@ int main(void)
   radio_tx_service_ready =
       ((radio_tx_service_init_status == RADIO_TX_SERVICE_OK) &&
        RadioTxService_IsReady());
+
+  low_power_rtc_ready = LowPower_RtcInit();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -606,24 +983,6 @@ int main(void)
         }
     }
 
-    if (bma456_service_ready &&
-        ((HAL_GetTick() - bma456_service_last_read_tick) >= 500U))
-    {
-        bma456_service_last_read_tick = HAL_GetTick();
-        bma456_service_read_status = SensorService_ReadBmaSample(&bma456_service_sample);
-
-        if ((bma456_service_read_status == SENSOR_SERVICE_OK) &&
-            telemetry_window_ready)
-        {
-            TelemetryWindow_RecordBma456(
-                &telemetry_window_service,
-                bma456_service_sample.step_total,
-                bma456_service_sample.x_mg,
-                bma456_service_sample.y_mg,
-                bma456_service_sample.z_mg);
-        }
-    }
-
     if (tmp_service_ready &&
         ((HAL_GetTick() - tmp_service_last_read_tick) >=
          (sensor_service_config.temperature.sample_period_s * 1000UL)))
@@ -641,9 +1000,8 @@ int main(void)
 
     /*
      * At every 15-minute boundary take the final measurements, freeze the
-     * window and encode compact Telemetry V2.2. Unlike the previous staging
-     * version, the packet is then copied into RadioTxService-owned RAM before
-     * transmission.
+     * window and encode compact Telemetry V2.2. BMA456 Step + XYZ is sampled
+     * exactly once here; there is no 500 ms BMA polling path anymore.
      */
     if (telemetry_window_ready &&
         TelemetryWindow_IsDue(&telemetry_window_service, HAL_GetTick()))
@@ -758,14 +1116,24 @@ int main(void)
         }
     }
 
-    /* Start a newly queued attempt without waiting for the next 10 ms loop. */
+    /* Start a newly queued attempt without waiting for another scheduler pass. */
     if (radio_tx_service_ready)
     {
         RadioTxService_Process(HAL_GetTick());
     }
 
     HAL_IWDG_Refresh(&hiwdg);
-    HAL_Delay(10U);
+
+    /*
+     * STOP2 is allowed only after all cooperative work is drained. The RTC
+     * budget is tightened to the next telemetry, temperature or event deadline.
+     * BMA INT1 can wake the MCU asynchronously before the RTC wakeup fires.
+     */
+    now_ms = HAL_GetTick();
+    if (!LowPower_TryEnterStop2(LowPower_ComputeIdleBudget(now_ms)))
+    {
+        HAL_Delay(10U);
+    }
   }
   /* USER CODE END 3 */
 }
@@ -904,9 +1272,10 @@ static void MX_I2C3_Init(void)
 static void MX_IWDG_Init(void)
 {
   hiwdg.Instance = IWDG;
-  hiwdg.Init.Prescaler = IWDG_PRESCALER_32;
+  /* ~32 s nominal timeout from LSI; STOP2 chunks stay below 20 s. */
+  hiwdg.Init.Prescaler = IWDG_PRESCALER_256;
   hiwdg.Init.Window = 4095;
-  hiwdg.Init.Reload = 999;
+  hiwdg.Init.Reload = 4095;
   if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
   {
     Error_Handler();
@@ -918,7 +1287,7 @@ static void MX_SPI1_Init(void)
   hspi1.Instance = SPI1;
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.DataSize = SPI_DATASIZE_8B;
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
@@ -940,7 +1309,7 @@ static void MX_SPI2_Init(void)
   hspi2.Instance = SPI2;
   hspi2.Init.Mode = SPI_MODE_MASTER;
   hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.DataSize = SPI_DATASIZE_8B;
   hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi2.Init.NSS = SPI_NSS_SOFT;
