@@ -271,6 +271,12 @@ static void MacMcpsConfirm(McpsConfirm_t *confirm)
     }
     else
     {
+        /*
+         * A hard McpsRequest error is still a real attempt from the
+         * application's retry-policy point of view. Bound it so a persistent
+         * MAC/radio error cannot keep the MCU awake forever.
+         */
+        entry->attempts++;
         lorawan_uplink_service_diag.tx_failure_count++;
 
         if (entry->attempts < s_max_tx_attempts)
@@ -642,6 +648,12 @@ static void TrySendControlResponse(uint32_t now_ms)
     }
     else
     {
+        /*
+         * Count hard request failures as attempts too. Without this, a
+         * persistent non-BUSY/non-duty-cycle error retries forever because the
+         * attempt counter only advanced after LORAMAC_STATUS_OK.
+         */
+        s_control_response_attempts++;
         lorawan_uplink_service_diag.downlink_response_tx_failure_count++;
 
         if (s_control_response_attempts < s_max_tx_attempts)
@@ -962,4 +974,22 @@ bool LoRaWanUplinkService_CanAccept(void)
 bool LoRaWanUplinkService_IsJoined(void)
 {
     return (s_initialized && s_joined);
+}
+
+bool LoRaWanUplinkService_HasPendingControlResponse(void)
+{
+    return (s_initialized && s_control_response_pending);
+}
+
+bool LoRaWanUplinkService_IsRadioCritical(void)
+{
+    /*
+     * Blocking sensor work must not run while a TX/RX transaction is active,
+     * while LoRaMAC asked to be serviced, or while a radio DIO is waiting for
+     * cooperative processing. This protects TxDone -> RX1/RX2 timing.
+     */
+    return (s_initialized &&
+            (s_tx_in_flight ||
+             lorawan_uplink_service_diag.mac_process_pending ||
+             (RFM95W_Board_GetPendingIrqMask() != 0U)));
 }
