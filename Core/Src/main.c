@@ -155,6 +155,7 @@ uint32_t bma_event_service_any_motion_count = 0U;
 uint32_t bma_event_service_read_failure_count = 0U;
 uint32_t radio_critical_sensor_defer_count = 0U;
 uint32_t telemetry_backpressure_defer_count = 0U;
+static bool s_telemetry_backpressure_latched = false;
 
 /* TMP117 SensorService diagnostics. */
 sensor_service_status_t tmp_service_init_status = SENSOR_SERVICE_ERROR_TMP_INIT;
@@ -1137,7 +1138,15 @@ int main(void)
         telemetry_payload_v2_2_ready &&
         TelemetryWindow_IsDue(&telemetry_window_service, HAL_GetTick()))
     {
-        telemetry_backpressure_defer_count++;
+        if (!s_telemetry_backpressure_latched)
+        {
+            telemetry_backpressure_defer_count++;
+            s_telemetry_backpressure_latched = true;
+        }
+    }
+    else if (!telemetry_payload_v2_2_ready)
+    {
+        s_telemetry_backpressure_latched = false;
     }
 
     /*
