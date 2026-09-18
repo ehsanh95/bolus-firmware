@@ -1,13 +1,13 @@
 # BSP — Board Support Package
 
-کدهای وابسته به برد Bolus و GPIOهای خاص سخت‌افزار.
+Board-specific Bolus code and hardware GPIO ownership live here.
 
-| فایل | وظیفه |
+| File | Purpose |
 |---|---|
-| `bolus_power.c/.h` | کنترل railهای TMP117، MPU6050، BMA456، RFM95W و SOC divider |
-| `bolus_led.c/.h` | abstraction LEDهای سنسور، MCU و RF |
-| `bma_irq_diag.c/.h` | مدیریت EXTI مربوط به BMA456 INT1 و diagnostics |
+| `bolus_power.c/.h` | Controls the TMP117, MPU6050, BMA456, RFM95W, and SOC-divider power domains |
+| `bolus_led.c/.h` | Abstraction for sensor, MCU, and RF LEDs |
+| `bma_irq_diag.c/.h` | BMA456 INT1 EXTI handling and IRQ diagnostics |
 
-BMA456 در معماری Low Power معمولاً روشن می‌ماند. MPU6050 در حالت عادی خاموش است و فقط برای burst event روشن می‌شود.
+In the low-power architecture, the BMA456 normally remains powered. The MPU6050 is normally off and is enabled only for event bursts.
 
-ISR مربوط به BMA456 فقط کار سبک انجام می‌دهد؛ SPI و event processing در main context انجام می‌شوند.
+The BMA456 ISR performs only minimal work; SPI access and event processing are deferred to main context.

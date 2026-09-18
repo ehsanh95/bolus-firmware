@@ -1,11 +1,11 @@
 # Core
 
-بخش MCU-level پروژه که عمدتاً توسط STM32CubeMX/CubeIDE ساخته شده و نقاط اتصال application را فراهم می‌کند.
+MCU-level project code, largely generated or structured around STM32CubeMX/CubeIDE, plus the application integration points.
 
-| پوشه | وظیفه |
+| Directory | Purpose |
 |---|---|
-| `Inc` | headerهای اصلی MCU/HAL |
-| `Src` | main، interruptها، MSP و system support |
-| `Startup` | vector table و reset startup assembly |
+| `Inc` | Main MCU/HAL headers |
+| `Src` | Main loop, interrupts, MSP, and system support |
+| `Startup` | Vector table and reset startup assembly |
 
-منطق محصول تا جای ممکن باید در `App` بماند. `Core/Src/main.c` orchestration اصلی و Low Power scheduler را اجرا می‌کند.
+Product logic should stay in `App` whenever possible. `Core/Src/main.c` coordinates the top-level application flow and the low-power scheduler.

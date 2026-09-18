@@ -1,16 +1,16 @@
 # App
 
-کدهای اختصاصی محصول Bolus در این پوشه قرار دارند.
+This directory contains the Bolus product-specific firmware.
 
-| پوشه | وظیفه |
+| Directory | Purpose |
 |---|---|
-| `Application` | قراردادهای داده و typeهای مشترک |
-| `BSP` | abstraction برد، GPIO و power |
-| `Config` | تنظیمات سخت‌افزار و runtime |
-| `Drivers` | دسترسی سطح پایین به قطعات |
-| `Services` | منطق سطح بالای محصول |
+| `Application` | Shared application data contracts and types |
+| `BSP` | Board-level GPIO, power, and hardware abstractions |
+| `Config` | Hardware and runtime configuration |
+| `Drivers` | Low-level device access |
+| `Services` | Product-level orchestration and policy |
 
-اصل معماری:
+Architecture rule:
 
 ```text
 Application models
@@ -22,4 +22,4 @@ Drivers / BSP
 STM32 HAL
 ```
 
-Driverها باید تا حد ممکن policy محصول را ندانند؛ زمان‌بندی، aggregation، retry و fault policy در Serviceها قرار می‌گیرد.
+Drivers should remain as policy-free as possible. Scheduling, aggregation, retry handling, and fault policy belong in the service layer.

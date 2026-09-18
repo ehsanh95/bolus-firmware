@@ -1,11 +1,11 @@
 # CMSIS
 
-CMSIS dependency مربوط به ARM Cortex-M و STM32L4.
+CMSIS dependency for ARM Cortex-M and STM32L4 devices.
 
-| مسیر/فایل | وظیفه |
+| Path / File | Purpose |
 |---|---|
-| `Include` | CMSIS Core headers و intrinsicها |
-| `Device` | STM32L4 device-specific headers/system definitions |
-| `LICENSE.txt` | مجوز استفاده |
+| `Include` | CMSIS Core headers and intrinsics |
+| `Device` | STM32L4 device-specific headers and system definitions |
+| `LICENSE.txt` | License information |
 
-این پوشه vendor code است و application logic نباید در آن اضافه شود.
+This is vendor code. Application logic should not be added here.

@@ -1,11 +1,11 @@
 # Battery Driver
 
-اندازه‌گیری ولتاژ باتری از طریق ADC و divider قابل کنترل.
+Battery voltage measurement using the ADC and a controllable resistor divider.
 
-| فایل | وظیفه |
+| File | Purpose |
 |---|---|
-| `battery.c` | ADC calibration، فعال‌سازی divider، conversion و تخمین درصد |
-| `battery.h` | API و status codeها |
+| `battery.c` | ADC calibration, divider control, conversion, and percentage estimation |
+| `battery.h` | Driver API and status codes |
 
 ```text
 SOC divider ON
@@ -19,4 +19,6 @@ raw → ADC mV → battery mV
 SOC divider OFF
 ```
 
-divider فقط هنگام اندازه‌گیری روشن می‌شود. جدول voltage-to-SOC فعلی bring-up estimate است و باید با discharge واقعی باتری کالیبره شود.
+The divider is enabled only during a measurement to avoid continuous current draw.
+
+The current voltage-to-SOC table is a bring-up estimate and should be calibrated against the actual Bolus battery discharge curve.

@@ -1,16 +1,16 @@
 # Config
 
-تنظیمات ثابت سخت‌افزار و configuration قابل تغییر application.
+Compile-time hardware settings and runtime application configuration are stored here.
 
-| فایل | وظیفه |
+| File | Purpose |
 |---|---|
-| `bolus_config.h` | RF defaults، polarity تغذیه، ADC، TMP117 و timingهای ثابت |
-| `bolus_runtime_config.c/.h` | runtime config، defaults، validation و event profiles |
-| `bolus_lorawan_credentials.h` | provisioning و policy LoRaWAN |
-| `lorawan_conf.h` | تنظیم middleware LoRaWAN |
-| `mw_log_conf.h` | logging middleware |
-| `utilities_conf.h` | تنظیم utilityهای ST |
+| `bolus_config.h` | RF defaults, power polarity, ADC, TMP117, and fixed timing values |
+| `bolus_runtime_config.c/.h` | Runtime configuration, defaults, validation, and event profiles |
+| `bolus_lorawan_credentials.h` | LoRaWAN provisioning and credential policy |
+| `lorawan_conf.h` | LoRaWAN middleware configuration |
+| `mw_log_conf.h` | Middleware logging configuration |
+| `utilities_conf.h` | ST utility configuration |
 
-`bolus_config.h` برای خصوصیات فیزیکی/bring-up است و `bolus_runtime_config` برای policyهایی که ممکن است در runtime یا downlink تغییر کنند.
+Use `bolus_config.h` for physical hardware and bring-up constants. Use `bolus_runtime_config` for policy that may change at runtime or through downlink commands.
 
-در شاخه Low Power، uplink پیش‌فرض **900 ثانیه / 15 دقیقه** است.
+On the low-power branch, the default uplink period is **900 seconds / 15 minutes**.

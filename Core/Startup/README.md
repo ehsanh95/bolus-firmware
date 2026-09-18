@@ -1,11 +1,11 @@
 # Core/Startup
 
-Startup assembly مخصوص STM32L476RGT6.
+Startup assembly for the STM32L476RGT6.
 
-| فایل | وظیفه |
+| File | Purpose |
 |---|---|
-| `startup_stm32l476rgtx.s` | vector table، Reset_Handler، stack initialization و weak IRQ handlers |
+| `startup_stm32l476rgtx.s` | Vector table, Reset_Handler, stack initialization, and weak IRQ handlers |
 
-این فایل قبل از `main()` اجرا می‌شود. handlerهای C با strong definition می‌توانند weak handlerهای startup را override کنند؛ برای نمونه `RTC_WKUP_IRQHandler`.
+This code runs before `main()`. Strong C definitions can override weak handlers provided by the startup file, for example `RTC_WKUP_IRQHandler`.
 
-معمولاً logic application نباید در این فایل قرار بگیرد.
+Application logic should normally not be added here.

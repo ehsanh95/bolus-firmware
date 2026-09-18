@@ -1,19 +1,19 @@
 # RFM95W / SX1276
 
-درایور radio و adapter پروژه برای ماژول RFM95W مبتنی بر SX1276.
+Radio driver and Bolus board adapter for the RFM95W module based on the SX1276 transceiver.
 
-| فایل | وظیفه |
+| File | Purpose |
 |---|---|
-| `radio.h` | interface عمومی Radio مورد انتظار LoRaMAC |
-| `sx1276.c/.h` | driver اصلی SX1276 |
-| `sx1276Regs-LoRa.h` | register/bit definitions حالت LoRa |
-| `sx1276Regs-Fsk.h` | register/bit definitions حالت FSK |
-| `rfm95w_board.c/.h` | اتصال driver به SPI/GPIO/EXTI برد Bolus |
-| `timer.c/.h` | timer cooperative سازگار با LoRaMAC |
-| `systime.c/.h` | system-time API مورد نیاز LoRaMAC |
+| `radio.h` | Generic Radio interface expected by LoRaMAC |
+| `sx1276.c/.h` | Main SX1276 driver |
+| `sx1276Regs-LoRa.h` | LoRa register and bit definitions |
+| `sx1276Regs-Fsk.h` | FSK register and bit definitions |
+| `rfm95w_board.c/.h` | SPI/GPIO/EXTI adaptation for the Bolus board |
+| `timer.c/.h` | Cooperative timer implementation compatible with LoRaMAC |
+| `systime.c/.h` | System-time API required by LoRaMAC |
 
-`rfm95w_board.c` مسئول SPI، NSS، Reset، DIO flags و bridge به HAL است.
+`rfm95w_board.c` owns SPI transfers, NSS, reset control, DIO interrupt flags, and the HAL bridge.
 
-DIO handlerهای SX1276 داخل EXTI اجرا نمی‌شوند؛ ISR فقط pending flag می‌گذارد و پردازش واقعی در main context انجام می‌شود. این موضوع برای Class A مهم است چون `TxDone` باید سریع پردازش شود تا RX1/RX2 به‌موقع باز شوند.
+SX1276 DIO processing is deferred: the EXTI ISR only records a pending interrupt, and the actual radio processing runs in main context. This matters for LoRaWAN Class A because `TxDone` must be processed promptly so RX1 and RX2 are scheduled correctly.
 
-خواب داخلی SX1276 با خاموش‌کردن کامل rail RFM95W متفاوت است.
+Putting the SX1276 into radio sleep is not the same as physically removing power from the RFM95W rail.

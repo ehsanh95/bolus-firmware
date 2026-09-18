@@ -1,11 +1,11 @@
 # Core/Inc
 
-Headerهای اصلی STM32 application.
+Main STM32 application headers.
 
-| فایل | وظیفه |
+| File | Purpose |
 |---|---|
-| `main.h` | pin mapping، peripheral declarations و compatibility definitions |
-| `stm32l4xx_hal_conf.h` | فعال/غیرفعال کردن moduleهای HAL |
-| `stm32l4xx_it.h` | prototype interrupt handlerها |
+| `main.h` | Pin mapping, peripheral declarations, and compatibility definitions |
+| `stm32l4xx_hal_conf.h` | STM32 HAL module configuration |
+| `stm32l4xx_it.h` | Interrupt-handler prototypes |
 
-این فایل‌ها به CubeMX/CubeIDE نزدیک هستند. پس از regeneration باید تغییرات دستی و compatibility patchها بررسی شوند.
+These files are closely tied to CubeMX/CubeIDE. After project regeneration, manually maintained compatibility changes and USER CODE sections should be reviewed.

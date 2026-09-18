@@ -1,11 +1,13 @@
 # MPU6050
 
-MPU6050 در Bolus یک سنسور **burst-only** است، نه motion sensor دائمی.
+The MPU6050 is used as a **burst-only** sensor in Bolus, not as a continuously active motion source.
 
-| فایل | وظیفه |
+| File | Purpose |
 |---|---|
-| `MPU6050.c/.h` | driver پایه I2C و accel/gyro/temp/sleep/wake |
-| `mpu6050_motion.c/.h` | wrapper پروژه برای scaling، config و burst sampling |
+| `MPU6050.c/.h` | Base I2C driver and accel/gyro/temp/sleep/wake functions |
+| `mpu6050_motion.c/.h` | Bolus wrapper for scaling, configuration, and burst sampling |
+
+Typical event flow:
 
 ```text
 BMA event accepted
@@ -23,6 +25,6 @@ software sleep
 rail OFF
 ```
 
-featureهای burst شامل peak/RMS acceleration، angular velocity، total angular motion و تغییر orientation هستند.
+Burst features include peak/RMS acceleration, angular velocity, total angular motion, and orientation change.
 
-MPU6050 نباید منبع Step Counter یا XYZ telemetry باشد؛ این داده‌ها متعلق به BMA456 هستند.
+The MPU6050 must not be used as the source of Step Counter or primary XYZ telemetry. Those fields belong to the BMA456 path.

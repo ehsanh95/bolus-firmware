@@ -1,9 +1,9 @@
 # Tools
 
-ابزارهای کمکی توسعه و تنظیم پروژه.
+Development and project-configuration helper scripts.
 
-| فایل | وظیفه |
+| File | Purpose |
 |---|---|
-| `enable_lorawan_cubeide.py` | کمک به فعال/هماهنگ کردن source/includeهای LoRaWAN در STM32CubeIDE |
+| `enable_lorawan_cubeide.py` | Helps enable and synchronize LoRaWAN sources/include paths in the STM32CubeIDE project |
 
-این script بخشی از firmware runtime نیست و روی MCU اجرا نمی‌شود.
+These tools are not part of the firmware runtime and do not execute on the MCU.

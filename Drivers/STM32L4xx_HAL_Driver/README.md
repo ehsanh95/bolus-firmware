@@ -1,11 +1,11 @@
 # STM32L4 HAL Driver
 
-HAL رسمی ST برای خانواده STM32L4.
+Official ST HAL implementation for the STM32L4 family.
 
-| مسیر/فایل | وظیفه |
+| Path / File | Purpose |
 |---|---|
-| `Inc` | header و APIهای HAL |
-| `Src` | implementation GPIO، SPI، I2C، ADC، PWR، RCC و سایر peripheralها |
-| `LICENSE.txt` | license |
+| `Inc` | HAL headers and public APIs |
+| `Src` | GPIO, SPI, I2C, ADC, PWR, RCC, and other peripheral implementations |
+| `LICENSE.txt` | License information |
 
-توابعی مانند `HAL_PWREx_EnterSTOP2Mode()` از این dependency می‌آیند، اما policy ورود به STOP2 در `Core/Src/main.c` قرار دارد.
+Functions such as `HAL_PWREx_EnterSTOP2Mode()` come from this dependency, while the policy that decides **when** to enter STOP2 lives in `Core/Src/main.c`.

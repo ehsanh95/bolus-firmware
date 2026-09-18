@@ -1,8 +1,8 @@
 # Bolus Firmware
 
-Firmware پروژه‌ی **Bolus** برای STM32L476RGT6، سنسورها و ارتباط LoRaWAN.
+Firmware for the **Bolus** project, built around the STM32L476RGT6, onboard sensors, and LoRaWAN connectivity.
 
-## معماری کلی
+## High-Level Architecture
 
 ```text
 BMA456 Any-Motion / RTC wake
@@ -27,43 +27,43 @@ LoRaWanUplinkService
 SX1276 / RFM95W
 ```
 
-## سخت‌افزار اصلی
+## Main Hardware
 
-| بخش | قطعه | نقش |
+| Section | Device | Role |
 |---|---|---|
-| MCU | STM32L476RGT6 | اجرای firmware و Low Power |
-| Motion | BMA456 | Any-Motion، Step Counter و XYZ |
-| Temperature | TMP117 | اندازه‌گیری دما |
-| Burst motion | MPU6050 | burst کوتاه هنگام event |
-| Radio | RFM95W / SX1276 | LoRaWAN EU868 Class A |
+| MCU | STM32L476RGT6 | Firmware execution and low-power control |
+| Motion | BMA456 | Any-Motion, Step Counter, and XYZ acceleration |
+| Temperature | TMP117 | Precision temperature measurement |
+| Burst motion | MPU6050 | Short event-driven motion burst capture |
+| Radio | RFM95W / SX1276 | LoRaWAN EU868 Class A communication |
 
-## ساختار Repository
+## Repository Structure
 
-| مسیر | وظیفه |
+| Path | Purpose |
 |---|---|
-| `App/Application` | مدل‌های داده و typeهای سطح application |
-| `App/BSP` | کنترل power، LED و IRQ |
-| `App/Config` | تنظیمات compile-time و runtime |
-| `App/Drivers` | درایورهای باتری، سنسورها و رادیو |
-| `App/Services` | منطق سنسور، event، telemetry و LoRaWAN |
-| `Core` | startup، main و interruptها |
-| `Drivers` | STM32 HAL و CMSIS |
-| `ThirdParty` | I-CUBE-LRWAN و middleware خارجی |
-| `docs` | اسناد معماری و validation |
-| `tests` | تست codec و decoder |
-| `tools` | ابزارهای کمکی توسعه |
+| `App/Application` | Application-level data models and shared types |
+| `App/BSP` | Power, LED, and board IRQ support |
+| `App/Config` | Compile-time and runtime configuration |
+| `App/Drivers` | Battery, sensor, and radio drivers |
+| `App/Services` | Sensor, event, telemetry, and LoRaWAN logic |
+| `Core` | Startup, main loop, and interrupt integration |
+| `Drivers` | STM32 HAL and CMSIS dependencies |
+| `ThirdParty` | I-CUBE-LRWAN and other external middleware |
+| `docs` | Architecture and validation notes |
+| `tests` | Codec and decoder tests |
+| `tools` | Development helper scripts |
 
 ## Low Power
 
-در شاخه‌ی `phase6/low-power-stop2` MCU بین deadlineها وارد STOP2 می‌شود. BMA456 روشن می‌ماند و با Any-Motion MCU را بیدار می‌کند. MPU6050 فقط هنگام event روشن می‌شود.
+On the `phase6/low-power-stop2` branch, the MCU enters STOP2 between application deadlines. The BMA456 remains powered and can wake the MCU through Any-Motion. The MPU6050 is powered only for event bursts.
 
 ## Telemetry
 
 - FPort 2: telemetry
 - FPort 3: application downlink
-- FPort 4: ACK/NACK
+- FPort 4: ACK/NACK response
 - V2: 32 bytes
 - V2.1: 42 bytes
 - V2.2: 38 bytes
 
-Step و XYZ مسیر فعال telemetry از **BMA456** می‌آیند، نه MPU6050.
+Step Counter and XYZ values in the active telemetry path come from the **BMA456**, not the MPU6050.

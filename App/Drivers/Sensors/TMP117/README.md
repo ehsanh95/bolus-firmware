@@ -1,16 +1,16 @@
 # TMP117
 
-درایور TMP117 برای اندازه‌گیری دمای دقیق از طریق I2C.
+TMP117 driver for precision temperature measurement over I2C.
 
-| فایل | وظیفه |
+| File | Purpose |
 |---|---|
-| `tmp117.c` | register access و temperature conversion |
-| `tmp117.h` | register definitions، modeها و API |
+| `tmp117.c` | Register access and temperature conversion implementation |
+| `tmp117.h` | Register definitions, operating modes, and public API |
 
-در معماری Bolus سنسور عمدتاً در Shutdown Mode است و هنگام نیاز One-Shot خوانده می‌شود:
+In the Bolus architecture, the sensor normally remains in Shutdown Mode and is read using one-shot conversions:
 
 ```text
 Shutdown → One-Shot → wait DRDY → read → Shutdown
 ```
 
-Driver عمومی است؛ timeout، validation، fault reporting و schedule در `SensorService` انجام می‌شود.
+The base driver is generic. Timeout handling, validation, fault reporting, and scheduling are implemented by `SensorService`.

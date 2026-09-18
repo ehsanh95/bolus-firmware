@@ -1,17 +1,17 @@
 # ThirdParty
 
-Dependencyهای خارجی غیر از STM32 HAL.
+External middleware dependencies other than the STM32 HAL.
 
-| پوشه | وظیفه |
+| Directory | Purpose |
 |---|---|
-| `I-CUBE-LRWAN` | LoRaWAN MAC، Region، Crypto، utilityها و reference code از ST/Semtech |
+| `I-CUBE-LRWAN` | LoRaWAN MAC, Region, Crypto, utilities, and reference code from ST/Semtech |
 
-README اصلی package داخل `I-CUBE-LRWAN/README.md` نیز نگهداری شده است.
+The package's original README is preserved at `I-CUBE-LRWAN/README.md`.
 
-تا جای ممکن middleware vendor دست‌نخورده باقی بماند. adaptation پروژه بهتر است در این مسیرها انجام شود:
+Vendor middleware should remain unchanged whenever practical. Bolus-specific adaptation should preferably live in:
 
 - `App/Drivers/RF/RFM95W`
 - `App/Services/lorawan_uplink_service.*`
 - `App/Config/*`
 
-این جداسازی upgrade نسخه‌های بعدی I-CUBE-LRWAN را ساده‌تر می‌کند.
+Keeping this separation makes future I-CUBE-LRWAN upgrades easier.

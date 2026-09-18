@@ -1,10 +1,10 @@
 # STM32 Drivers
 
-Dependencyهای رسمی ST برای MCU؛ عمدتاً application-owned نیستند.
+Official ST dependencies for the MCU. These directories are generally not application-owned.
 
-| پوشه | وظیفه |
+| Directory | Purpose |
 |---|---|
-| `CMSIS` | تعریف Cortex/STM32 device و core API |
-| `STM32L4xx_HAL_Driver` | STM32 HAL implementation/headerها |
+| `CMSIS` | Cortex/STM32 device definitions and core APIs |
+| `STM32L4xx_HAL_Driver` | STM32 HAL headers and implementations |
 
-تا جای ممکن vendor files را مستقیم تغییر ندهید. تغییر application بهتر است در `Core`، `App/BSP` یا `App/Drivers` انجام شود تا upgrade/regeneration ساده بماند.
+Avoid direct vendor-code modifications whenever possible. Product changes should normally be implemented in `Core`, `App/BSP`, or `App/Drivers` so future CubeMX regeneration and vendor upgrades remain manageable.

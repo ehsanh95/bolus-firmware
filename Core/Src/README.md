@@ -1,16 +1,16 @@
 # Core/Src
 
-کد اجرایی سطح MCU.
+MCU-level executable source files.
 
-| فایل | وظیفه |
+| File | Purpose |
 |---|---|
-| `main.c` | init سخت‌افزار، service orchestration، telemetry schedule و STOP2 |
-| `stm32l4xx_hal_msp.c` | setup سطح MSP برای peripheralها |
-| `stm32l4xx_it.c` | exception و interrupt handlerهای اصلی |
-| `system_stm32l4xx.c` | system clock/Core startup support از ST |
-| `syscalls.c` | syscall stubs برای newlib |
-| `sysmem.c` | heap و `_sbrk` support |
+| `main.c` | Hardware initialization, service orchestration, telemetry scheduling, and STOP2 control |
+| `stm32l4xx_hal_msp.c` | MSP-level peripheral setup |
+| `stm32l4xx_it.c` | Main exception and interrupt handlers |
+| `system_stm32l4xx.c` | ST system clock and Cortex startup support |
+| `syscalls.c` | newlib syscall stubs |
+| `sysmem.c` | Heap and `_sbrk` support |
 
-در شاخه Low Power، `main.c` سنسورها، Event Episode، telemetry 15 دقیقه‌ای، LoRaWAN، IWDG، RTC wake و STOP2 را هماهنگ می‌کند.
+On the low-power branch, `main.c` coordinates sensors, Event Episodes, 15-minute telemetry, LoRaWAN processing, IWDG refresh, RTC wake scheduling, and STOP2 entry/exit.
 
-قبل از sensor work blocking وضعیت radio critical بررسی می‌شود تا `TxDone` و RX1/RX2 به تأخیر نیفتند.
+Before starting blocking sensor work, the main loop checks the radio-critical state so `TxDone` processing and RX1/RX2 timing are not delayed.

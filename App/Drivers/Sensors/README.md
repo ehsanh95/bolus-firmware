@@ -1,12 +1,14 @@
 # Sensor Drivers
 
-درایورهای سنسورهای Bolus.
+Sensor drivers used by the Bolus firmware.
 
-| پوشه | سنسور | نقش اصلی |
+| Directory | Sensor | Primary Role |
 |---|---|---|
-| `BMA456` | Bosch BMA456 | motion اصلی، Step Counter و Any-Motion |
-| `TMP117` | TI TMP117 | دمای دقیق |
-| `MPU6050` | MPU6050 | burst کوتاه برای featureهای حرکتی/چرخشی |
+| `BMA456` | Bosch BMA456 | Main motion source, Step Counter, and Any-Motion |
+| `TMP117` | TI TMP117 | Precision temperature sensing |
+| `MPU6050` | MPU6050 | Short event-driven motion/orientation bursts |
+
+Power architecture:
 
 ```text
 BMA456: ON / sentinel
@@ -14,4 +16,4 @@ TMP117: shutdown + one-shot
 MPU6050: rail OFF → event → burst → OFF
 ```
 
-Step و XYZ telemetry از BMA456 گرفته می‌شوند. MPU6050 منبع اصلی step/accel telemetry نیست.
+Step Counter and XYZ telemetry are sourced from the BMA456. The MPU6050 is not the primary source for step or acceleration telemetry.
