@@ -152,6 +152,9 @@ bool bma_event_service_ready = false;
 uint32_t bma_event_service_processed_irq_count = 0U;
 uint32_t bma_event_service_ack_count = 0U;
 uint32_t bma_event_service_any_motion_count = 0U;
+uint32_t bma_event_service_read_failure_count = 0U;
+uint32_t radio_critical_sensor_defer_count = 0U;
+uint32_t telemetry_backpressure_defer_count = 0U;
 
 /* TMP117 SensorService diagnostics. */
 sensor_service_status_t tmp_service_init_status = SENSOR_SERVICE_ERROR_TMP_INIT;
@@ -533,6 +536,20 @@ static bool LowPower_TryEnterStop2(uint32_t idle_budget_ms)
     rtc_before_ms = LowPower_RtcTimeOfDayMs();
     if (!LowPower_ArmWakeup(sleep_seconds))
     {
+        return false;
+    }
+
+    /*
+     * Re-check asynchronous work after arming the RTC. This closes the large
+     * part of the check-to-WFI race: a BMA edge or radio DIO that arrived while
+     * preparing STOP2 is serviced on the next scheduler pass instead of being
+     * delayed by a full sleep chunk.
+     */
+    if ((bma_event_service_ready &&
+         (bma_irq_diag_count != bma_event_service_processed_irq_count)) ||
+        (radio_tx_service_ready && RadioTxService_IsRadioCritical()))
+    {
+        LowPower_DisarmWakeup();
         return false;
     }
 
@@ -933,7 +950,13 @@ int main(void)
         RadioTxService_Process(now_ms);
     }
 
-    if (bma_event_service_ready)
+    /*
+     * TMP117 one-shot reads and MPU6050 bursts are blocking. Never start them
+     * while LoRaMAC is inside TX/RX1/RX2 or has an unprocessed DIO/MAC event.
+     * This preserves the TxDone -> RX-window timing contract.
+     */
+    if (bma_event_service_ready &&
+        (!radio_tx_service_ready || !RadioTxService_IsRadioCritical()))
     {
         uint32_t irq_count_snapshot = bma_irq_diag_count;
 
@@ -942,9 +965,15 @@ int main(void)
             bma_event_service_read_status =
                 BmaEventService_Read(&bma_event_service_sample);
 
+            /*
+             * Consume the IRQ even on a sensor read failure. The service has
+             * already raised a communication fault; keeping the count pending
+             * forever would otherwise prevent STOP2 and drain the battery.
+             */
+            bma_event_service_processed_irq_count = irq_count_snapshot;
+
             if (bma_event_service_read_status == BMA_EVENT_SERVICE_OK)
             {
-                bma_event_service_processed_irq_count = irq_count_snapshot;
                 bma_event_service_ack_count++;
 
                 if (bma_event_service_sample.any_motion)
@@ -966,10 +995,20 @@ int main(void)
                     }
                 }
             }
+            else
+            {
+                bma_event_service_read_failure_count++;
+            }
         }
     }
+    else if (bma_event_service_ready &&
+             (bma_irq_diag_count != bma_event_service_processed_irq_count))
+    {
+        radio_critical_sensor_defer_count++;
+    }
 
-    if (event_episode_ready)
+    if (event_episode_ready &&
+        (!radio_tx_service_ready || !RadioTxService_IsRadioCritical()))
     {
         event_episode_service_status =
             EventEpisodeService_Poll(
@@ -984,6 +1023,7 @@ int main(void)
     }
 
     if (tmp_service_ready &&
+        (!radio_tx_service_ready || !RadioTxService_IsRadioCritical()) &&
         ((HAL_GetTick() - tmp_service_last_read_tick) >=
          (sensor_service_config.temperature.sample_period_s * 1000UL)))
     {
@@ -1004,13 +1044,13 @@ int main(void)
      * exactly once here; there is no 500 ms BMA polling path anymore.
      */
     if (telemetry_window_ready &&
+        !telemetry_payload_v2_2_ready &&
+        (!radio_tx_service_ready || !RadioTxService_IsRadioCritical()) &&
         TelemetryWindow_IsDue(&telemetry_window_service, HAL_GetTick()))
     {
         battery_status_t battery_mv_status;
         bolus_health_status_t health;
         bool fault_present;
-
-        telemetry_payload_v2_2_ready = false;
 
         if (tmp_service_ready)
         {
@@ -1091,6 +1131,13 @@ int main(void)
         {
             telemetry_snapshot_failure_count++;
         }
+    }
+
+    if (telemetry_window_ready &&
+        telemetry_payload_v2_2_ready &&
+        TelemetryWindow_IsDue(&telemetry_window_service, HAL_GetTick()))
+    {
+        telemetry_backpressure_defer_count++;
     }
 
     /*
