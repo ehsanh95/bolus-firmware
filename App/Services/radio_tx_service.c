@@ -21,12 +21,13 @@ static bool s_ready = false;
 
 static bool ControlResponsePending(void)
 {
-    uint32_t completed_count =
-        lorawan_uplink_service_diag.downlink_response_tx_success_count +
-        lorawan_uplink_service_diag.downlink_response_drop_count;
-
-    return (lorawan_uplink_service_diag.downlink_response_queued_count >
-            completed_count);
+    /*
+     * Use the LoRaWAN service's authoritative state. Diagnostic counters are
+     * not a state machine: a second command dropped while a response is
+     * pending can legitimately change drop_count without completing the
+     * original response.
+     */
+    return LoRaWanUplinkService_HasPendingControlResponse();
 }
 
 void RadioTxService_AttachEvents(RadioEvents_t *events)
@@ -188,4 +189,9 @@ bool RadioTxService_IsBusy(void)
             (lorawan_uplink_service_diag.tx_in_flight ||
              (lorawan_uplink_service_diag.queue_count > 0U) ||
              ControlResponsePending()));
+}
+
+bool RadioTxService_IsRadioCritical(void)
+{
+    return (s_ready && LoRaWanUplinkService_IsRadioCritical());
 }
