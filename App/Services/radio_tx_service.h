@@ -95,4 +95,7 @@ bool RadioTxService_IsReady(void);
 bool RadioTxService_CanAccept(void);
 bool RadioTxService_IsBusy(void);
 
+/* True only while blocking sensor work could disturb active MAC/radio timing. */
+bool RadioTxService_IsRadioCritical(void);
+
 #endif /* RADIO_TX_SERVICE_H */
