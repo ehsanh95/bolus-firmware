@@ -128,4 +128,8 @@ bool LoRaWanUplinkService_IsReady(void);
 bool LoRaWanUplinkService_CanAccept(void);
 bool LoRaWanUplinkService_IsJoined(void);
 
+/* Exact service state used by the low-power/application scheduler. */
+bool LoRaWanUplinkService_HasPendingControlResponse(void);
+bool LoRaWanUplinkService_IsRadioCritical(void);
+
 #endif /* LORAWAN_UPLINK_SERVICE_H */
