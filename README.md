@@ -5,20 +5,22 @@ Firmware for the **Bolus** project, built around the STM32L476RGT6, onboard sens
 ## High-Level Architecture
 
 ```text
-BMA456 Any-Motion / RTC wake
-        ↓
-Core/Src/main.c
+BMA456 Any-Motion ─┐
+                    ├─→ Core/Src/main.c / Event Manager
+TMP117 HIGH/LOW ────┘
         ↓
 SensorService
- ├─ BMA456: Step + XYZ snapshot
- ├─ TMP117: temperature one-shot
- └─ MPU6050: event-driven burst only
+ ├─ BMA456: always-on Step + Any-Motion sentinel
+ ├─ TMP117: low-rate continuous HIGH/LOW thermal sentinel
+ └─ MPU6050: adaptive, power-gated event burst only
         ↓
 EventEpisodeService
+ ├─ Motion / Thermal / Combined Episodes
+ └─ EventDigestService (RAM)
         ↓
 TelemetryWindowService
         ↓
-TelemetryCodec
+TelemetryCodec V3
         ↓
 RadioTxService
         ↓
@@ -55,15 +57,16 @@ SX1276 / RFM95W
 
 ## Low Power
 
-On the `phase6/low-power-stop2` branch, the MCU enters STOP2 between application deadlines. The BMA456 remains powered and can wake the MCU through Any-Motion. The MPU6050 is powered only for event bursts.
+On the `phase6/low-power-stop2` branch, the MCU enters STOP2 between application deadlines. Acquisition Level 0 disables background event wakeups and takes fresh sensor data only at the telemetry boundary. Levels 1..5 use BMA456 Any-Motion plus TMP117 independent HIGH/LOW Alert Mode as dual low-power sentinels. The MPU6050 remains power-gated and is enabled only for selected informative motion bursts.
 
 ## Telemetry
 
 - FPort 2: telemetry
 - FPort 3: application downlink
 - FPort 4: ACK/NACK response
-- V2: 32 bytes
-- V2.1: 42 bytes
-- V2.2: 38 bytes
+- V2: 32 bytes — legacy/frozen
+- V2.1: 42 bytes — legacy/frozen
+- V2.2: 38 bytes — legacy/frozen
+- V3: active variable-length summary + per-Episode digests, max 51 bytes per packet
 
-Step Counter and XYZ values in the active telemetry path come from the **BMA456**, not the MPU6050.
+V3 sends a 15-minute summary plus as many closed Episode digests as fit in the packet; additional digests use continuation packets with the same window sequence. Step activity is transmitted as a per-window delta from the **BMA456**.

@@ -216,7 +216,7 @@
  * DATA mode:
  * ALERT indicates Data Ready.
  */
-#define TMP117_DEFAULT_ALERT_MODE       TMP117_DATA_MODE
+#define TMP117_DEFAULT_ALERT_MODE       TMP117_ALERT_MODE
 
 
 /*

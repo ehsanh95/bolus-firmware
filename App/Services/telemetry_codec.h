@@ -10,11 +10,19 @@
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V2       2U
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V2_1     3U
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V2_2     4U
+#define BOLUS_TELEMETRY_PROTOCOL_VERSION_V3       5U
 #define BOLUS_TELEMETRY_MESSAGE_TYPE_SUMMARY      1U
+#define BOLUS_TELEMETRY_MESSAGE_TYPE_CONTINUATION 2U
 #define BOLUS_TELEMETRY_SUMMARY_V1_SIZE           24U
 #define BOLUS_TELEMETRY_SUMMARY_V2_SIZE           32U
 #define BOLUS_TELEMETRY_SUMMARY_V2_1_SIZE         42U
 #define BOLUS_TELEMETRY_SUMMARY_V2_2_SIZE         38U
+#define BOLUS_TELEMETRY_V3_HEADER_SIZE             18U
+#define BOLUS_TELEMETRY_V3_CONT_HEADER_SIZE         5U
+#define BOLUS_TELEMETRY_V3_DIGEST_SIZE             11U
+#define BOLUS_TELEMETRY_V3_MAX_PACKET_SIZE         51U
+#define BOLUS_TELEMETRY_V3_SUMMARY_DIGESTS          3U
+#define BOLUS_TELEMETRY_V3_CONT_DIGESTS             4U
 
 /* Legacy V1 status bits. */
 #define BOLUS_TELEMETRY_STATUS_TEMP_VALID         (1U << 0)
@@ -128,5 +136,30 @@ telemetry_codec_status_t TelemetryCodec_EncodeSummaryV2_2(
     uint8_t *payload,
     size_t payload_capacity,
     size_t *payload_size);
+
+telemetry_codec_status_t TelemetryCodec_EncodeSummaryV3(
+    const bolus_telemetry_summary_v2_2_t *summary,
+    uint8_t acquisition_profile,
+    bool digest_overflow,
+    uint16_t step_delta,
+    uint8_t suppressed_trigger_count,
+    const bolus_event_digest_t *digests,
+    uint8_t digest_count,
+    uint8_t *payload,
+    size_t payload_capacity,
+    size_t *payload_size,
+    uint8_t *digests_consumed,
+    bool *more);
+
+telemetry_codec_status_t TelemetryCodec_EncodeContinuationV3(
+    uint16_t sequence,
+    uint8_t packet_index,
+    const bolus_event_digest_t *digests,
+    uint8_t digest_count,
+    uint8_t *payload,
+    size_t payload_capacity,
+    size_t *payload_size,
+    uint8_t *digests_consumed,
+    bool *more);
 
 #endif /* TELEMETRY_CODEC_H */

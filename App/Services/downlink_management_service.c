@@ -25,6 +25,11 @@ static uint32_t ReadU32Le(const uint8_t *value)
            ((uint32_t)value[3] << 24);
 }
 
+static int16_t ReadI16Le(const uint8_t *value)
+{
+    return (int16_t)ReadU16Le(value);
+}
+
 static void BuildResponse(
     uint8_t transaction_id,
     downlink_result_t result,
@@ -60,6 +65,7 @@ static downlink_result_t ApplyCommand(
     switch ((downlink_command_id_t)command_id)
     {
         case DOWNLINK_CMD_SET_BMA_EVENT_SENSITIVITY:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
             if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
             if (value[0] > (uint8_t)BOLUS_BMA_EVENT_SENSITIVITY_OFF)
                 return DOWNLINK_RESULT_ERROR_VALUE;
@@ -76,6 +82,7 @@ static downlink_result_t ApplyCommand(
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_BMA_STEP_SENSITIVITY:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
             if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
             if (value[0] > (uint8_t)BOLUS_BMA_STEP_SENSITIVITY_LEVEL_7)
                 return DOWNLINK_RESULT_ERROR_VALUE;
@@ -85,23 +92,27 @@ static downlink_result_t ApplyCommand(
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_EPISODE_RETRIGGER_GUARD_MS:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
             if (length != 2U) return DOWNLINK_RESULT_ERROR_LENGTH;
             candidate->event_processing.episode_retrigger_guard_ms = ReadU16Le(value);
             *apply_mask |= DOWNLINK_APPLY_EVENT_EPISODE;
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_EPISODE_QUIET_TIMEOUT_S:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
             if (length != 2U) return DOWNLINK_RESULT_ERROR_LENGTH;
             candidate->event_processing.episode_quiet_timeout_s = ReadU16Le(value);
             *apply_mask |= DOWNLINK_APPLY_EVENT_EPISODE;
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_TMP_SAMPLE_PERIOD_S:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
             if (length != 4U) return DOWNLINK_RESULT_ERROR_LENGTH;
             candidate->temperature.sample_period_s = ReadU32Le(value);
             return DOWNLINK_RESULT_ACCEPTED_NO_LIVE_RECONFIG;
 
         case DOWNLINK_CMD_SET_MPU_BURST_DURATION_MS:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
             if (length != 2U) return DOWNLINK_RESULT_ERROR_LENGTH;
             candidate->mpu.burst_duration_ms = ReadU16Le(value);
             *apply_mask |= DOWNLINK_APPLY_MPU_SENSOR;
@@ -114,6 +125,7 @@ static downlink_result_t ApplyCommand(
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_EVENT_ENABLE:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
             if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
             if (value[0] > 1U) return DOWNLINK_RESULT_ERROR_VALUE;
             candidate->event_processing.enable = (value[0] != 0U);
@@ -121,6 +133,7 @@ static downlink_result_t ApplyCommand(
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         case DOWNLINK_CMD_SET_MPU_EVENT_TRIGGER_ENABLE:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
             if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
             if (value[0] > 1U) return DOWNLINK_RESULT_ERROR_VALUE;
             candidate->mpu.event_trigger_enable = (value[0] != 0U);
@@ -174,6 +187,52 @@ static downlink_result_t ApplyCommand(
             if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
             candidate->radio.max_tx_attempts = value[0];
             *apply_mask |= DOWNLINK_APPLY_RADIO_POLICY;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
+        case DOWNLINK_CMD_SET_ACQUISITION_LEVEL:
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            if (value[0] > (uint8_t)BOLUS_ACQUISITION_LEVEL_5)
+                return DOWNLINK_RESULT_ERROR_VALUE;
+            if (!BolusRuntimeConfig_ApplyAcquisitionLevel(
+                    candidate, (bolus_acquisition_level_t)value[0]))
+                return DOWNLINK_RESULT_ERROR_VALUE;
+            *apply_mask |= DOWNLINK_APPLY_BMA_EVENT |
+                           DOWNLINK_APPLY_TMP_SENSOR |
+                           DOWNLINK_APPLY_EVENT_EPISODE |
+                           DOWNLINK_APPLY_MPU_SENSOR;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
+        case DOWNLINK_CMD_SET_TMP_ALERT_ENABLE:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            if (value[0] > 1U) return DOWNLINK_RESULT_ERROR_VALUE;
+            candidate->temperature.alert_enable = (value[0] != 0U);
+            candidate->temperature.strategy =
+                candidate->temperature.alert_enable ?
+                BOLUS_TEMP_STRATEGY_HYBRID : BOLUS_TEMP_STRATEGY_PERIODIC;
+            *apply_mask |= DOWNLINK_APPLY_TMP_SENSOR;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
+        case DOWNLINK_CMD_SET_TMP_HIGH_LIMIT:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
+            if (length != 2U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            candidate->temperature.high_limit_centi_c = ReadI16Le(value);
+            *apply_mask |= DOWNLINK_APPLY_TMP_SENSOR;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
+        case DOWNLINK_CMD_SET_TMP_LOW_LIMIT:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
+            if (length != 2U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            candidate->temperature.low_limit_centi_c = ReadI16Le(value);
+            *apply_mask |= DOWNLINK_APPLY_TMP_SENSOR;
+            return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
+
+        case DOWNLINK_CMD_SET_TMP_CONVERSION_CYCLE:
+            candidate->operating_mode = BOLUS_MODE_CUSTOM;
+            if (length != 1U) return DOWNLINK_RESULT_ERROR_LENGTH;
+            if (value[0] > 7U) return DOWNLINK_RESULT_ERROR_VALUE;
+            candidate->temperature.conversion_cycle = value[0];
+            *apply_mask |= DOWNLINK_APPLY_TMP_SENSOR;
             return DOWNLINK_RESULT_ACCEPTED_PENDING_APPLY;
 
         default:

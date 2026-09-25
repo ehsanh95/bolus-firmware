@@ -32,6 +32,9 @@
 #include "telemetry_codec.h"
 #include "radio_tx_service.h"
 #include "bma_irq_diag.h"
+#include "tmp_irq_diag.h"
+#include "event_digest_service.h"
+#include "downlink_management_service.h"
 #include "bolus_runtime_config.h"
 #include "rfm95w_board.h"
 #include "timer.h"
@@ -157,12 +160,19 @@ uint32_t radio_critical_sensor_defer_count = 0U;
 uint32_t telemetry_backpressure_defer_count = 0U;
 static bool s_telemetry_backpressure_latched = false;
 
-/* TMP117 SensorService diagnostics. */
+/* TMP117 dual-sentinel diagnostics. */
 sensor_service_status_t tmp_service_init_status = SENSOR_SERVICE_ERROR_TMP_INIT;
 sensor_service_status_t tmp_service_read_status = SENSOR_SERVICE_ERROR_TMP_READ;
 sensor_service_temperature_sample_t tmp_service_sample = {0};
+sensor_service_temperature_alert_t tmp_service_alert_sample = {0};
 bool tmp_service_ready = false;
 uint32_t tmp_service_last_read_tick = 0U;
+uint32_t tmp_irq_processed_count = 0U;
+uint32_t tmp_alert_high_count = 0U;
+uint32_t tmp_alert_low_count = 0U;
+uint32_t tmp_alert_read_failure_count = 0U;
+bool tmp_thermal_latched = false;
+uint32_t tmp_thermal_next_check_tick = 0U;
 
 /* Event Episode diagnostics and non-blocking thermal policy. */
 event_episode_service_t event_episode_service = {0};
@@ -193,18 +203,28 @@ uint16_t event_episode_last_mpu_sample_count = 0U;
 uint16_t event_episode_last_mpu_peak_gyro_dps = 0U;
 uint16_t event_episode_last_mpu_orientation_change_cdeg = 0U;
 
-/* 15-minute telemetry snapshot and encoding diagnostics. */
+/* Episode digests + active Telemetry V3 transport. */
+event_digest_service_t event_digest_service = {0};
+bolus_event_digest_t telemetry_frozen_digests[EVENT_DIGEST_CAPACITY] = {0};
+uint8_t telemetry_frozen_digest_count = 0U;
+uint8_t telemetry_frozen_digest_offset = 0U;
+uint8_t telemetry_v3_continuation_index = 1U;
+bool telemetry_v3_more = false;
+bool telemetry_digest_overflow = false;
+
 telemetry_window_service_t telemetry_window_service = {0};
 telemetry_window_status_t telemetry_window_status = TELEMETRY_WINDOW_ERROR_CONFIG;
 bolus_telemetry_summary_v2_2_t telemetry_frozen_summary_v2_2 = {0};
 telemetry_codec_status_t telemetry_codec_status = TELEMETRY_CODEC_ERROR_PARAM;
-uint8_t telemetry_payload_v2_2[BOLUS_TELEMETRY_SUMMARY_V2_2_SIZE] = {0};
-size_t telemetry_payload_v2_2_size = 0U;
+uint8_t telemetry_payload_v3[BOLUS_TELEMETRY_V3_MAX_PACKET_SIZE] = {0};
+size_t telemetry_payload_v3_size = 0U;
 bool telemetry_window_ready = false;
-bool telemetry_payload_v2_2_ready = false;
+bool telemetry_payload_v3_ready = false;
+uint32_t telemetry_payload_v3_queued_count = 0U;
 uint32_t telemetry_snapshot_count = 0U;
 uint32_t telemetry_snapshot_failure_count = 0U;
 uint16_t telemetry_last_battery_mv = 0U;
+uint16_t telemetry_last_step_delta = 0U;
 
 /* Phase 6 STOP2 diagnostics, intentionally debugger-visible. */
 bool low_power_rtc_ready = false;
@@ -231,6 +251,8 @@ static void MX_IWDG_Init(void);
 static bool LowPower_RtcInit(void);
 static bool LowPower_TryEnterStop2(uint32_t idle_budget_ms);
 static uint32_t LowPower_ComputeIdleBudget(uint32_t now_ms);
+static void ApplyPendingRuntimeConfig(void);
+static void ProcessThermalSentinel(uint32_t now_ms, bool from_irq);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -444,37 +466,36 @@ static uint32_t LowPower_ComputeIdleBudget(uint32_t now_ms)
     uint32_t budget_ms = LOW_POWER_MAX_IDLE_MS;
 
     if (telemetry_window_ready)
-    {
         LowPower_TightenBudget(
             now_ms,
             telemetry_window_service.window_start_ms +
                 telemetry_window_service.uplink_period_ms,
             &budget_ms);
-    }
 
-    if (tmp_service_ready)
-    {
+    if (tmp_service_ready &&
+        (sensor_service_config.acquisition_level != BOLUS_ACQUISITION_LEVEL_0) &&
+        (sensor_service_config.temperature.strategy == BOLUS_TEMP_STRATEGY_PERIODIC))
         LowPower_TightenBudget(
             now_ms,
             tmp_service_last_read_tick +
                 (sensor_service_config.temperature.sample_period_s * 1000UL),
             &budget_ms);
-    }
+
+    if (tmp_thermal_latched)
+        LowPower_TightenBudget(now_ms, tmp_thermal_next_check_tick, &budget_ms);
 
     if (event_episode_ready && event_episode_service.active)
     {
         LowPower_TightenBudget(
-            now_ms,
-            event_episode_service.close_deadline_ms,
-            &budget_ms);
+            now_ms, event_episode_service.max_deadline_ms, &budget_ms);
+
+        if (!event_episode_service.thermal_active)
+            LowPower_TightenBudget(
+                now_ms, event_episode_service.close_deadline_ms, &budget_ms);
 
         if (event_episode_service.followup_active)
-        {
             LowPower_TightenBudget(
-                now_ms,
-                event_episode_service.next_followup_due_ms,
-                &budget_ms);
-        }
+                now_ms, event_episode_service.next_followup_due_ms, &budget_ms);
     }
 
     return budget_ms;
@@ -482,15 +503,8 @@ static uint32_t LowPower_ComputeIdleBudget(uint32_t now_ms)
 
 static bool LowPower_CanEnterStop2(void)
 {
-    if (!low_power_rtc_ready)
-    {
+    if (!low_power_rtc_ready || telemetry_payload_v3_ready)
         return false;
-    }
-
-    if (telemetry_payload_v2_2_ready)
-    {
-        return false;
-    }
 
     if (radio_tx_service_ready && RadioTxService_IsBusy())
     {
@@ -500,9 +514,11 @@ static bool LowPower_CanEnterStop2(void)
 
     if (bma_event_service_ready &&
         (bma_irq_diag_count != bma_event_service_processed_irq_count))
-    {
         return false;
-    }
+
+    if (SensorService_IsTemperatureSentinelActive() &&
+        (tmp_irq_diag_count != tmp_irq_processed_count))
+        return false;
 
     return true;
 }
@@ -548,6 +564,8 @@ static bool LowPower_TryEnterStop2(uint32_t idle_budget_ms)
      */
     if ((bma_event_service_ready &&
          (bma_irq_diag_count != bma_event_service_processed_irq_count)) ||
+        (SensorService_IsTemperatureSentinelActive() &&
+         (tmp_irq_diag_count != tmp_irq_processed_count)) ||
         (radio_tx_service_ready && RadioTxService_IsRadioCritical()))
     {
         LowPower_DisarmWakeup();
@@ -612,27 +630,29 @@ void RTC_WKUP_IRQHandler(void)
     EXTI->PR1 = LOW_POWER_RTC_EXTI_LINE;
 }
 
+static uint32_t ThermalFollowupMs(void)
+{
+    switch (sensor_service_config.acquisition_level)
+    {
+        case BOLUS_ACQUISITION_LEVEL_1:
+        case BOLUS_ACQUISITION_LEVEL_2: return 120000UL;
+        case BOLUS_ACQUISITION_LEVEL_3: return 60000UL;
+        case BOLUS_ACQUISITION_LEVEL_4: return 30000UL;
+        case BOLUS_ACQUISITION_LEVEL_5: return 15000UL;
+        default: return 120000UL;
+    }
+}
+
 static void HandleEventEpisodeAction(const event_episode_action_t *action)
 {
-    if (action == NULL)
-    {
-        return;
-    }
+    if (action == NULL) return;
 
     if (telemetry_window_ready)
-    {
         TelemetryWindow_RecordEpisodeAction(&telemetry_window_service, action);
-    }
 
-    if (action->pulse_accepted)
-    {
-        event_episode_motion_pulse_count++;
-    }
-
+    if (action->pulse_accepted) event_episode_motion_pulse_count++;
     if (action->pulse_suppressed_by_guard)
-    {
         event_episode_retrigger_suppressed_count++;
-    }
 
     if (action->episode_closed)
     {
@@ -641,6 +661,11 @@ static void HandleEventEpisodeAction(const event_episode_action_t *action)
                 &event_episode_last_closed_summary) == EVENT_EPISODE_OK)
         {
             event_episode_closed_count++;
+            (void)EventDigestService_PushClosedEpisode(
+                &event_digest_service,
+                &event_episode_last_closed_summary,
+                telemetry_window_service.window_start_ms);
+
         }
     }
 
@@ -670,27 +695,20 @@ static void HandleEventEpisodeAction(const event_episode_action_t *action)
                      EVENT_EPISODE_TEMP_SOURCE_FIRST_PULSE) ||
                     (action->temperature_source ==
                      EVENT_EPISODE_TEMP_SOURCE_MOTION_PULSE))
-                {
                     event_episode_pulse_temperature_count++;
-                }
                 else if (action->temperature_source ==
                          EVENT_EPISODE_TEMP_SOURCE_FOLLOWUP)
-                {
                     event_episode_followup_temperature_count++;
-                }
 
-                event_episode_service_status =
-                    EventEpisodeService_RecordTemperature(
-                        &event_episode_service,
-                        action->temperature_source,
-                        tmp_service_sample.temperature_mdeg_c);
+                (void)EventEpisodeService_RecordTemperature(
+                    &event_episode_service,
+                    action->temperature_source,
+                    tmp_service_sample.temperature_mdeg_c);
 
                 if (telemetry_window_ready)
-                {
                     TelemetryWindow_RecordTemperature(
                         &telemetry_window_service,
                         tmp_service_sample.temperature_mdeg_c);
-                }
             }
         }
     }
@@ -701,20 +719,20 @@ static void HandleEventEpisodeAction(const event_episode_action_t *action)
         if (!mpu_service_ready)
         {
             event_episode_mpu_burst_failure_count++;
+            EventEpisodeService_MarkMpuFailure(&event_episode_service);
         }
         else
         {
             HAL_IWDG_Refresh(&hiwdg);
-
             mpu_service_read_status =
                 SensorService_ReadMpuBurst(&mpu_service_burst_features);
             mpu_service_last_read_tick = HAL_GetTick();
-
             HAL_IWDG_Refresh(&hiwdg);
 
             if (mpu_service_read_status != SENSOR_SERVICE_OK)
             {
                 event_episode_mpu_burst_failure_count++;
+                EventEpisodeService_MarkMpuFailure(&event_episode_service);
             }
             else
             {
@@ -735,12 +753,9 @@ static void HandleEventEpisodeAction(const event_episode_action_t *action)
                 event_episode_mpu_features.orientation_change_cdeg =
                     mpu_service_burst_features.orientation_change_cdeg;
 
-                event_episode_service_status =
-                    EventEpisodeService_RecordMpuBurst(
+                if (EventEpisodeService_RecordMpuBurst(
                         &event_episode_service,
-                        &event_episode_mpu_features);
-
-                if (event_episode_service_status == EVENT_EPISODE_OK)
+                        &event_episode_mpu_features) == EVENT_EPISODE_OK)
                 {
                     event_episode_mpu_burst_count++;
                     event_episode_last_mpu_sample_count =
@@ -751,18 +766,222 @@ static void HandleEventEpisodeAction(const event_episode_action_t *action)
                         mpu_service_burst_features.orientation_change_cdeg;
 
                     if (telemetry_window_ready)
-                    {
                         TelemetryWindow_RecordMpuBurst(
                             &telemetry_window_service,
                             &mpu_service_burst_features);
-                    }
-                }
-                else
-                {
-                    event_episode_mpu_burst_failure_count++;
                 }
             }
         }
+    }
+}
+
+static void ProcessThermalSentinel(uint32_t now_ms, bool from_irq)
+{
+    bool high = false;
+    bool low = false;
+    int32_t temp_mdeg_c;
+
+    if (!tmp_service_ready || !SensorService_IsTemperatureSentinelActive())
+        return;
+
+    if (from_irq)
+    {
+        tmp_service_read_status =
+            SensorService_ReadTemperatureAlert(&tmp_service_alert_sample);
+        if (tmp_service_read_status != SENSOR_SERVICE_OK)
+        {
+            tmp_alert_read_failure_count++;
+            return;
+        }
+        tmp_service_sample = tmp_service_alert_sample.sample;
+        high = tmp_service_alert_sample.high_alert;
+        low = tmp_service_alert_sample.low_alert;
+    }
+    else
+    {
+        tmp_service_read_status =
+            SensorService_ReadTemperatureOneShot(&tmp_service_sample);
+        if (tmp_service_read_status != SENSOR_SERVICE_OK)
+        {
+            tmp_alert_read_failure_count++;
+            return;
+        }
+    }
+
+    temp_mdeg_c = tmp_service_sample.temperature_mdeg_c;
+    if (!high && !low)
+    {
+        high = (temp_mdeg_c >=
+            ((int32_t)sensor_service_config.temperature.high_limit_centi_c * 10L));
+        low = (temp_mdeg_c <=
+            ((int32_t)sensor_service_config.temperature.low_limit_centi_c * 10L));
+    }
+
+    tmp_service_last_read_tick = now_ms;
+
+    if (high || low)
+    {
+        if (high) tmp_alert_high_count++;
+        if (low) tmp_alert_low_count++;
+
+        if (!tmp_thermal_latched)
+        {
+            tmp_thermal_latched = true;
+            TmpIrqDiag_Disable();
+        }
+
+        if (event_episode_ready)
+        {
+            event_episode_service_status =
+                EventEpisodeService_OnThermalAlert(
+                    &event_episode_service,
+                    now_ms,
+                    high,
+                    low,
+                    &event_episode_action);
+
+            if (event_episode_service_status == EVENT_EPISODE_OK)
+            {
+                HandleEventEpisodeAction(&event_episode_action);
+                (void)EventEpisodeService_RecordTemperature(
+                    &event_episode_service,
+                    EVENT_EPISODE_TEMP_SOURCE_THERMAL,
+                    temp_mdeg_c);
+            }
+        }
+
+        if (telemetry_window_ready)
+            TelemetryWindow_RecordTemperature(
+                &telemetry_window_service, temp_mdeg_c);
+
+        tmp_thermal_next_check_tick = now_ms + ThermalFollowupMs();
+    }
+    else if (tmp_thermal_latched)
+    {
+        if (event_episode_ready &&
+            EventEpisodeService_IsActive(&event_episode_service))
+        {
+            (void)EventEpisodeService_RecordTemperature(
+                &event_episode_service,
+                EVENT_EPISODE_TEMP_SOURCE_THERMAL,
+                temp_mdeg_c);
+            (void)EventEpisodeService_OnThermalNormal(
+                &event_episode_service,
+                now_ms,
+                &event_episode_action);
+            HandleEventEpisodeAction(&event_episode_action);
+        }
+
+        if (telemetry_window_ready)
+            TelemetryWindow_RecordTemperature(
+                &telemetry_window_service, temp_mdeg_c);
+
+        tmp_thermal_latched = false;
+        TmpIrqDiag_EnableCounterOnly();
+    }
+}
+
+static void ApplyPendingRuntimeConfig(void)
+{
+    downlink_apply_mask_t mask;
+    bool ok;
+
+    if (radio_tx_service_ready && RadioTxService_IsRadioCritical())
+        return;
+
+    mask = DownlinkManagementService_GetPendingApplyMask();
+    if (mask == DOWNLINK_APPLY_NONE) return;
+
+    if (EventEpisodeService_IsActive(&event_episode_service) &&
+        ((mask & (DOWNLINK_APPLY_BMA_SENSOR |
+                  DOWNLINK_APPLY_BMA_EVENT |
+                  DOWNLINK_APPLY_TMP_SENSOR |
+                  DOWNLINK_APPLY_EVENT_EPISODE |
+                  DOWNLINK_APPLY_MPU_SENSOR)) != 0U))
+    {
+        return;
+    }
+
+    if ((mask & DOWNLINK_APPLY_BMA_SENSOR) != 0U)
+    {
+        bma456_service_init_status =
+            SensorService_InitBma(&hspi2, &sensor_service_config);
+        bma456_service_ready =
+            (bma456_service_init_status == SENSOR_SERVICE_OK) &&
+            SensorService_IsBmaReady();
+        DownlinkManagementService_MarkApplyResult(
+            DOWNLINK_APPLY_BMA_SENSOR, bma456_service_ready);
+    }
+
+    if ((mask & DOWNLINK_APPLY_BMA_EVENT) != 0U)
+    {
+        bma_event_service_init_status =
+            BmaEventService_Init(&hspi2, &sensor_service_config);
+        ok = (bma_event_service_init_status == BMA_EVENT_SERVICE_OK) ||
+             (bma_event_service_init_status == BMA_EVENT_SERVICE_DISABLED);
+        bma_event_service_ready =
+            (bma_event_service_init_status == BMA_EVENT_SERVICE_OK) &&
+            BmaEventService_IsReady();
+        bma_event_service_processed_irq_count = bma_irq_diag_count;
+        DownlinkManagementService_MarkApplyResult(
+            DOWNLINK_APPLY_BMA_EVENT, ok);
+    }
+
+    if ((mask & DOWNLINK_APPLY_TMP_SENSOR) != 0U)
+    {
+        ok = (SensorService_ApplyTemperatureConfig(
+                  &sensor_service_config) == SENSOR_SERVICE_OK);
+        if (ok && SensorService_IsTemperatureSentinelActive())
+            TmpIrqDiag_EnableCounterOnly();
+        else
+            TmpIrqDiag_Disable();
+        tmp_thermal_latched = false;
+        tmp_irq_processed_count = tmp_irq_diag_count;
+        DownlinkManagementService_MarkApplyResult(
+            DOWNLINK_APPLY_TMP_SENSOR, ok);
+    }
+
+    if ((mask & DOWNLINK_APPLY_EVENT_EPISODE) != 0U)
+    {
+        if (!EventEpisodeService_IsActive(&event_episode_service))
+        {
+            event_episode_service_status =
+                EventEpisodeService_Init(
+                    &event_episode_service,
+                    &sensor_service_config);
+            event_episode_ready =
+                (event_episode_service_status == EVENT_EPISODE_OK);
+            DownlinkManagementService_MarkApplyResult(
+                DOWNLINK_APPLY_EVENT_EPISODE, event_episode_ready);
+        }
+    }
+
+    if ((mask & DOWNLINK_APPLY_MPU_SENSOR) != 0U)
+    {
+        mpu_service_init_status =
+            SensorService_InitMpu(&hi2c1, &sensor_service_config);
+        mpu_service_ready =
+            (mpu_service_init_status == SENSOR_SERVICE_OK) &&
+            SensorService_IsMpuReady();
+        DownlinkManagementService_MarkApplyResult(
+            DOWNLINK_APPLY_MPU_SENSOR, mpu_service_ready);
+    }
+
+    if ((mask & DOWNLINK_APPLY_TELEMETRY_WINDOW) != 0U)
+    {
+        ok = (TelemetryWindow_ApplyConfig(
+                  &telemetry_window_service,
+                  &sensor_service_config) == TELEMETRY_WINDOW_OK);
+        DownlinkManagementService_MarkApplyResult(
+            DOWNLINK_APPLY_TELEMETRY_WINDOW, ok);
+    }
+
+    if ((mask & DOWNLINK_APPLY_RADIO_POLICY) != 0U)
+    {
+        ok = radio_tx_service_ready &&
+             RadioTxService_ApplyPolicy(&sensor_service_config);
+        DownlinkManagementService_MarkApplyResult(
+            DOWNLINK_APPLY_RADIO_POLICY, ok);
     }
 }
 /* USER CODE END 0 */
@@ -800,30 +1019,10 @@ int main(void)
   BolusPower_Init();
   BolusLed_Init();
   FaultManager_Init();
-
   battery_status = Battery_Init(&hadc1);
-  if (battery_status == BATTERY_OK)
-  {
-      BolusLed_On(BOLUS_LED_SENSOR);
-      HAL_Delay(150U);
-      BolusLed_Off(BOLUS_LED_SENSOR);
-  }
-
-  BolusPower_On(BOLUS_POWER_BMA456);
-  HAL_Delay(10U);
-  HAL_GPIO_WritePin(Pedo_NSS_GPIO_Port, Pedo_NSS_Pin, GPIO_PIN_SET);
-  HAL_Delay(1U);
-  (void)BMA456_RawReadRegister(0x00U, &bma456_first_read);
-  HAL_Delay(1U);
-  bma456_spi_status = BMA456_RawReadRegister(0x00U, &bma456_chip_id);
-  bma456_chip_id_ok = ((bma456_spi_status == HAL_OK) && (bma456_chip_id == 0x16U));
-  bma456_pwr_status = BMA456_RawReadRegister(0x7CU, &bma456_pwr_conf_1);
-  HAL_Delay(1U);
-  (void)BMA456_RawReadRegister(0x7CU, &bma456_pwr_conf_2);
-  HAL_Delay(1U);
-  (void)BMA456_RawReadRegister(0x00U, &bma456_chip_id_3);
 
   BolusRuntimeConfig_LoadDefaults(&sensor_service_config);
+  EventDigestService_Init(&event_digest_service);
 
   event_episode_service_status =
       EventEpisodeService_Init(&event_episode_service, &sensor_service_config);
@@ -836,100 +1035,57 @@ int main(void)
           HAL_GetTick());
   telemetry_window_ready = (telemetry_window_status == TELEMETRY_WINDOW_OK);
 
-  bma456_service_init_status = SensorService_InitBma(&hspi2, &sensor_service_config);
+  bma456_service_init_status =
+      SensorService_InitBma(&hspi2, &sensor_service_config);
   bma456_service_ready =
-      ((bma456_service_init_status == SENSOR_SERVICE_OK) && SensorService_IsBmaReady());
+      (bma456_service_init_status == SENSOR_SERVICE_OK) &&
+      SensorService_IsBmaReady();
+
   if (bma456_service_ready)
   {
-      /*
-       * Do not poll Step/XYZ here or every 500 ms. BMA456 remains powered and
-       * counts steps/raises Any-Motion in hardware; its telemetry snapshot is
-       * read once, immediately before the 15-minute telemetry freeze.
-       */
-      bma456_service_last_read_tick = HAL_GetTick();
-
       bma_event_service_init_status =
           BmaEventService_Init(&hspi2, &sensor_service_config);
       bma_event_service_ready =
-          ((bma_event_service_init_status == BMA_EVENT_SERVICE_OK) &&
-           BmaEventService_IsReady());
+          (bma_event_service_init_status == BMA_EVENT_SERVICE_OK) &&
+          BmaEventService_IsReady();
+      bma_event_service_processed_irq_count = bma_irq_diag_count;
   }
 
-  tmp_service_init_status = SensorService_InitTemperature(&hi2c3, &sensor_service_config);
+  tmp_service_init_status =
+      SensorService_InitTemperature(&hi2c3, &sensor_service_config);
   tmp_service_ready =
-      ((tmp_service_init_status == SENSOR_SERVICE_OK) && SensorService_IsTemperatureReady());
-  if (tmp_service_ready)
-  {
-      tmp_service_read_status = SensorService_ReadTemperatureOneShot(&tmp_service_sample);
-      tmp_service_last_read_tick = HAL_GetTick();
+      (tmp_service_init_status == SENSOR_SERVICE_OK) &&
+      SensorService_IsTemperatureReady();
+  tmp_service_last_read_tick = HAL_GetTick();
 
-      if ((tmp_service_read_status == SENSOR_SERVICE_OK) && telemetry_window_ready)
-      {
-          TelemetryWindow_RecordTemperature(
-              &telemetry_window_service,
-              tmp_service_sample.temperature_mdeg_c);
-      }
-  }
+  if (tmp_service_ready && SensorService_IsTemperatureSentinelActive())
+      TmpIrqDiag_EnableCounterOnly();
+  else
+      TmpIrqDiag_Disable();
 
-  /* MPU6050 is configured once, then remains physically off until event burst. */
-  mpu_service_init_status = SensorService_InitMpu(&hi2c1, &sensor_service_config);
+  tmp_irq_processed_count = tmp_irq_diag_count;
+
+  mpu_service_init_status =
+      SensorService_InitMpu(&hi2c1, &sensor_service_config);
   mpu_service_ready =
-      ((mpu_service_init_status == SENSOR_SERVICE_OK) && SensorService_IsMpuReady());
+      (mpu_service_init_status == SENSOR_SERVICE_OK) &&
+      SensorService_IsMpuReady();
 
-  /*
-   * RFM95W Phase-4 regression remains intact. Attach managed TX callbacks before
-   * SX1276Init so the driver retains TxDone/TxTimeout function pointers.
-   */
   BolusPower_On(BOLUS_POWER_RFM95W);
   HAL_Delay(RFM95W_POWERUP_DELAY_MS);
   Sx_Board_Bus_Init();
   Sx_Board_IoInit();
   RadioTxService_AttachEvents(&rfm95w_radio_events);
   HAL_IWDG_Refresh(&hiwdg);
-  rfm95w_wakeup_time_ms = SX1276Init(&rfm95w_radio_events);
+  (void)SX1276Init(&rfm95w_radio_events);
+  SX1276SetSleep();
   HAL_IWDG_Refresh(&hiwdg);
-  rfm95w_version_after_init = SX1276Read(RFM95W_REG_VERSION);
-  rfm95w_state_after_init = SX1276GetStatus();
-  rfm95w_init_ok =
-      ((rfm95w_version_after_init == RFM95W_EXPECTED_VERSION) &&
-       (rfm95w_state_after_init == RF_IDLE));
 
-  SX1276SetModem(MODEM_LORA);
-  SX1276SetSleep();
-  HAL_Delay(2U);
-  rfm95w_opmode_sleep = SX1276Read(REG_OPMODE);
-  rfm95w_sleep_ok =
-      (((rfm95w_opmode_sleep & 0x80U) != 0U) &&
-       ((rfm95w_opmode_sleep & 0x07U) == RF_OPMODE_SLEEP));
-
-  SX1276SetStby();
-  HAL_Delay(2U);
-  rfm95w_opmode_stby = SX1276Read(REG_OPMODE);
-  rfm95w_stby_ok =
-      (((rfm95w_opmode_stby & 0x80U) != 0U) &&
-       ((rfm95w_opmode_stby & 0x07U) == RF_OPMODE_STANDBY));
-
-  SX1276SetChannel(RFM95W_DEFAULT_FREQUENCY_HZ);
-  rfm95w_frf_msb = SX1276Read(REG_FRFMSB);
-  rfm95w_frf_mid = SX1276Read(REG_FRFMID);
-  rfm95w_frf_lsb = SX1276Read(REG_FRFLSB);
-  rfm95w_frf_actual =
-      ((uint32_t)rfm95w_frf_msb << 16) |
-      ((uint32_t)rfm95w_frf_mid << 8) |
-      ((uint32_t)rfm95w_frf_lsb);
-  rfm95w_frf_expected =
-      (uint32_t)((((uint64_t)RFM95W_DEFAULT_FREQUENCY_HZ) << 19) / 32000000ULL);
-  rfm95w_freq_ok = (rfm95w_frf_actual == rfm95w_frf_expected);
-  rfm95w_final_spi_status = RFM95W_Board_GetLastSpiStatus();
-  rfm95w_final_ok =
-      (rfm95w_init_ok && rfm95w_sleep_ok && rfm95w_stby_ok && rfm95w_freq_ok &&
-       (rfm95w_final_spi_status == HAL_OK));
-  SX1276SetSleep();
-
-  radio_tx_service_init_status = RadioTxService_Init(&sensor_service_config);
+  radio_tx_service_init_status =
+      RadioTxService_Init(&sensor_service_config);
   radio_tx_service_ready =
-      ((radio_tx_service_init_status == RADIO_TX_SERVICE_OK) &&
-       RadioTxService_IsReady());
+      (radio_tx_service_init_status == RADIO_TX_SERVICE_OK) &&
+      RadioTxService_IsReady();
 
   low_power_rtc_ready = LowPower_RtcInit();
   /* USER CODE END 2 */
@@ -944,56 +1100,35 @@ int main(void)
     uint32_t now_ms = HAL_GetTick();
 
     TimerProcess();
-
-    /* Process deferred radio DIO and timeout state in cooperative main context. */
     if (radio_tx_service_ready)
-    {
         RadioTxService_Process(now_ms);
-    }
 
-    /*
-     * TMP117 one-shot reads and MPU6050 bursts are blocking. Never start them
-     * while LoRaMAC is inside TX/RX1/RX2 or has an unprocessed DIO/MAC event.
-     * This preserves the TxDone -> RX-window timing contract.
-     */
+    ApplyPendingRuntimeConfig();
+
     if (bma_event_service_ready &&
         (!radio_tx_service_ready || !RadioTxService_IsRadioCritical()))
     {
-        uint32_t irq_count_snapshot = bma_irq_diag_count;
-
-        if (irq_count_snapshot != bma_event_service_processed_irq_count)
+        uint32_t irq_snapshot = bma_irq_diag_count;
+        if (irq_snapshot != bma_event_service_processed_irq_count)
         {
             bma_event_service_read_status =
                 BmaEventService_Read(&bma_event_service_sample);
-
-            /*
-             * Consume the IRQ even on a sensor read failure. The service has
-             * already raised a communication fault; keeping the count pending
-             * forever would otherwise prevent STOP2 and drain the battery.
-             */
-            bma_event_service_processed_irq_count = irq_count_snapshot;
+            bma_event_service_processed_irq_count = irq_snapshot;
 
             if (bma_event_service_read_status == BMA_EVENT_SERVICE_OK)
             {
                 bma_event_service_ack_count++;
-
-                if (bma_event_service_sample.any_motion)
+                if (bma_event_service_sample.any_motion && event_episode_ready)
                 {
                     bma_event_service_any_motion_count++;
+                    event_episode_service_status =
+                        EventEpisodeService_OnMotionPulse(
+                            &event_episode_service,
+                            now_ms,
+                            &event_episode_action);
 
-                    if (event_episode_ready)
-                    {
-                        event_episode_service_status =
-                            EventEpisodeService_OnMotionPulse(
-                                &event_episode_service,
-                                now_ms,
-                                &event_episode_action);
-
-                        if (event_episode_service_status == EVENT_EPISODE_OK)
-                        {
-                            HandleEventEpisodeAction(&event_episode_action);
-                        }
-                    }
+                    if (event_episode_service_status == EVENT_EPISODE_OK)
+                        HandleEventEpisodeAction(&event_episode_action);
                 }
             }
             else
@@ -1008,6 +1143,24 @@ int main(void)
         radio_critical_sensor_defer_count++;
     }
 
+    if (SensorService_IsTemperatureSentinelActive() &&
+        (!radio_tx_service_ready || !RadioTxService_IsRadioCritical()))
+    {
+        uint32_t tmp_irq_snapshot = tmp_irq_diag_count;
+
+        if (tmp_irq_snapshot != tmp_irq_processed_count)
+        {
+            tmp_irq_processed_count = tmp_irq_snapshot;
+            ProcessThermalSentinel(now_ms, true);
+        }
+
+        if (tmp_thermal_latched &&
+            ((int32_t)(now_ms - tmp_thermal_next_check_tick) >= 0))
+        {
+            ProcessThermalSentinel(now_ms, false);
+        }
+    }
+
     if (event_episode_ready &&
         (!radio_tx_service_ready || !RadioTxService_IsRadioCritical()))
     {
@@ -1018,20 +1171,23 @@ int main(void)
                 &event_episode_action);
 
         if (event_episode_service_status == EVENT_EPISODE_OK)
-        {
             HandleEventEpisodeAction(&event_episode_action);
-        }
     }
 
     if (tmp_service_ready &&
+        (sensor_service_config.acquisition_level != BOLUS_ACQUISITION_LEVEL_0) &&
+        (sensor_service_config.temperature.strategy ==
+         BOLUS_TEMP_STRATEGY_PERIODIC) &&
         (!radio_tx_service_ready || !RadioTxService_IsRadioCritical()) &&
-        ((HAL_GetTick() - tmp_service_last_read_tick) >=
+        ((now_ms - tmp_service_last_read_tick) >=
          (sensor_service_config.temperature.sample_period_s * 1000UL)))
     {
-        tmp_service_last_read_tick = HAL_GetTick();
-        tmp_service_read_status = SensorService_ReadTemperatureOneShot(&tmp_service_sample);
+        tmp_service_last_read_tick = now_ms;
+        tmp_service_read_status =
+            SensorService_ReadTemperatureOneShot(&tmp_service_sample);
 
-        if ((tmp_service_read_status == SENSOR_SERVICE_OK) && telemetry_window_ready)
+        if ((tmp_service_read_status == SENSOR_SERVICE_OK) &&
+            telemetry_window_ready)
         {
             TelemetryWindow_RecordTemperature(
                 &telemetry_window_service,
@@ -1039,19 +1195,16 @@ int main(void)
         }
     }
 
-    /*
-     * At every 15-minute boundary take the final measurements, freeze the
-     * window and encode compact Telemetry V2.2. BMA456 Step + XYZ is sampled
-     * exactly once here; there is no 500 ms BMA polling path anymore.
-     */
     if (telemetry_window_ready &&
-        !telemetry_payload_v2_2_ready &&
+        !telemetry_payload_v3_ready &&
         (!radio_tx_service_ready || !RadioTxService_IsRadioCritical()) &&
-        TelemetryWindow_IsDue(&telemetry_window_service, HAL_GetTick()))
+        TelemetryWindow_IsDue(&telemetry_window_service, now_ms))
     {
         battery_status_t battery_mv_status;
         bolus_health_status_t health;
         bool fault_present;
+        uint8_t consumed = 0U;
+        bool more = false;
 
         if (tmp_service_ready)
         {
@@ -1060,13 +1213,12 @@ int main(void)
             tmp_service_last_read_tick = HAL_GetTick();
 
             if (tmp_service_read_status == SENSOR_SERVICE_OK)
-            {
                 TelemetryWindow_RecordTemperature(
                     &telemetry_window_service,
                     tmp_service_sample.temperature_mdeg_c);
-            }
         }
 
+        telemetry_last_step_delta = 0U;
         if (bma456_service_ready)
         {
             bma456_service_read_status =
@@ -1075,28 +1227,41 @@ int main(void)
 
             if (bma456_service_read_status == SENSOR_SERVICE_OK)
             {
+                telemetry_last_step_delta =
+                    (bma456_service_sample.step_delta > 0xFFFFUL) ?
+                    0xFFFFU : (uint16_t)bma456_service_sample.step_delta;
+
                 TelemetryWindow_RecordBma456(
                     &telemetry_window_service,
                     bma456_service_sample.step_total,
+                    telemetry_last_step_delta,
                     bma456_service_sample.x_mg,
                     bma456_service_sample.y_mg,
                     bma456_service_sample.z_mg);
             }
         }
 
-        battery_mv_status = Battery_ReadMillivolts(&telemetry_last_battery_mv);
+        battery_mv_status =
+            Battery_ReadMillivolts(&telemetry_last_battery_mv);
 
         if (battery_mv_status != BATTERY_OK)
-        {
             FaultManager_Raise(BOLUS_FAULT_BATTERY_MEASUREMENT);
-        }
         else
-        {
             (void)FaultManager_ClearFault(BOLUS_FAULT_BATTERY_MEASUREMENT);
-        }
 
         health = FaultManager_GetHealth();
         fault_present = (FaultManager_GetActiveMask() != 0U);
+
+        telemetry_digest_overflow =
+            EventDigestService_ConsumeOverflow(&event_digest_service);
+
+        telemetry_frozen_digest_count =
+            EventDigestService_SnapshotAndClear(
+                &event_digest_service,
+                telemetry_frozen_digests,
+                EVENT_DIGEST_CAPACITY);
+        telemetry_frozen_digest_offset = 0U;
+        telemetry_v3_continuation_index = 1U;
 
         telemetry_window_status =
             TelemetryWindow_FreezeSummaryV2_2(
@@ -1111,16 +1276,32 @@ int main(void)
 
         if (telemetry_window_status == TELEMETRY_WINDOW_OK)
         {
+            uint16_t suppressed =
+                telemetry_frozen_summary_v2_2.v2.suppressed_pulse_count;
+
             telemetry_codec_status =
-                TelemetryCodec_EncodeSummaryV2_2(
+                TelemetryCodec_EncodeSummaryV3(
                     &telemetry_frozen_summary_v2_2,
-                    telemetry_payload_v2_2,
-                    sizeof(telemetry_payload_v2_2),
-                    &telemetry_payload_v2_2_size);
+                    (uint8_t)(
+                        ((uint8_t)sensor_service_config.acquisition_level & 0x07U) |
+                        ((sensor_service_config.operating_mode == BOLUS_MODE_CUSTOM) ?
+                         0x80U : 0U)),
+                    telemetry_digest_overflow,
+                    telemetry_last_step_delta,
+                    (suppressed > 255U) ? 255U : (uint8_t)suppressed,
+                    telemetry_frozen_digests,
+                    telemetry_frozen_digest_count,
+                    telemetry_payload_v3,
+                    sizeof(telemetry_payload_v3),
+                    &telemetry_payload_v3_size,
+                    &consumed,
+                    &more);
 
             if (telemetry_codec_status == TELEMETRY_CODEC_OK)
             {
-                telemetry_payload_v2_2_ready = true;
+                telemetry_frozen_digest_offset = consumed;
+                telemetry_v3_more = more;
+                telemetry_payload_v3_ready = true;
                 telemetry_snapshot_count++;
             }
             else
@@ -1134,8 +1315,65 @@ int main(void)
         }
     }
 
+    if (radio_tx_service_ready &&
+        telemetry_payload_v3_ready &&
+        (telemetry_payload_v3_size > 0U) &&
+        RadioTxService_CanAccept())
+    {
+        radio_tx_service_submit_status =
+            RadioTxService_Submit(
+                telemetry_payload_v3,
+                (uint8_t)telemetry_payload_v3_size,
+                telemetry_frozen_summary_v2_2.v2.sequence);
+
+        if (radio_tx_service_submit_status == RADIO_TX_SERVICE_OK)
+        {
+            uint8_t consumed = 0U;
+            bool more = false;
+            telemetry_payload_v3_queued_count++;
+
+            if (telemetry_v3_more &&
+                (telemetry_frozen_digest_offset <
+                 telemetry_frozen_digest_count))
+            {
+                telemetry_codec_status =
+                    TelemetryCodec_EncodeContinuationV3(
+                        telemetry_frozen_summary_v2_2.v2.sequence,
+                        telemetry_v3_continuation_index++,
+                        &telemetry_frozen_digests[
+                            telemetry_frozen_digest_offset],
+                        (uint8_t)(telemetry_frozen_digest_count -
+                                  telemetry_frozen_digest_offset),
+                        telemetry_payload_v3,
+                        sizeof(telemetry_payload_v3),
+                        &telemetry_payload_v3_size,
+                        &consumed,
+                        &more);
+
+                if (telemetry_codec_status == TELEMETRY_CODEC_OK)
+                {
+                    telemetry_frozen_digest_offset += consumed;
+                    telemetry_v3_more = more;
+                    telemetry_payload_v3_ready = true;
+                }
+                else
+                {
+                    telemetry_payload_v3_ready = false;
+                    telemetry_snapshot_failure_count++;
+                }
+            }
+            else
+            {
+                telemetry_payload_v3_ready = false;
+                telemetry_v3_more = false;
+                telemetry_frozen_digest_count = 0U;
+                telemetry_frozen_digest_offset = 0U;
+            }
+        }
+    }
+
     if (telemetry_window_ready &&
-        telemetry_payload_v2_2_ready &&
+        telemetry_payload_v3_ready &&
         TelemetryWindow_IsDue(&telemetry_window_service, HAL_GetTick()))
     {
         if (!s_telemetry_backpressure_latched)
@@ -1144,52 +1382,19 @@ int main(void)
             s_telemetry_backpressure_latched = true;
         }
     }
-    else if (!telemetry_payload_v2_2_ready)
+    else if (!telemetry_payload_v3_ready)
     {
         s_telemetry_backpressure_latched = false;
     }
 
-    /*
-     * Transfer ownership of a frozen/encoded packet to the TX service exactly
-     * once. If the TX service is busy, keep telemetry_payload_v2_2_ready=true and
-     * try again on a later loop; the source buffer is not modified meanwhile.
-     */
-    if (radio_tx_service_ready &&
-        telemetry_payload_v2_2_ready &&
-        (telemetry_payload_v2_2_size > 0U) &&
-        RadioTxService_CanAccept())
-    {
-        radio_tx_service_submit_status =
-            RadioTxService_Submit(
-                telemetry_payload_v2_2,
-                (uint8_t)telemetry_payload_v2_2_size,
-                telemetry_frozen_summary_v2_2.v2.sequence);
-
-        if (radio_tx_service_submit_status == RADIO_TX_SERVICE_OK)
-        {
-            telemetry_payload_v2_2_ready = false;
-            telemetry_payload_v2_2_queued_count++;
-        }
-    }
-
-    /* Start a newly queued attempt without waiting for another scheduler pass. */
     if (radio_tx_service_ready)
-    {
         RadioTxService_Process(HAL_GetTick());
-    }
 
     HAL_IWDG_Refresh(&hiwdg);
-
-    /*
-     * STOP2 is allowed only after all cooperative work is drained. The RTC
-     * budget is tightened to the next telemetry, temperature or event deadline.
-     * BMA INT1 can wake the MCU asynchronously before the RTC wakeup fires.
-     */
     now_ms = HAL_GetTick();
+
     if (!LowPower_TryEnterStop2(LowPower_ComputeIdleBudget(now_ms)))
-    {
         HAL_Delay(10U);
-    }
   }
   /* USER CODE END 3 */
 }

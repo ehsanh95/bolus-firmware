@@ -191,6 +191,14 @@ bool RadioTxService_IsBusy(void)
              ControlResponsePending()));
 }
 
+bool RadioTxService_ApplyPolicy(
+    const bolus_runtime_config_t *config)
+{
+    if (!s_ready || (config == NULL))
+        return false;
+    return LoRaWanUplinkService_ApplyRadioPolicy(config);
+}
+
 bool RadioTxService_IsRadioCritical(void)
 {
     return (s_ready && LoRaWanUplinkService_IsRadioCritical());

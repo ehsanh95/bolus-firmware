@@ -128,6 +128,10 @@ bool LoRaWanUplinkService_IsReady(void);
 bool LoRaWanUplinkService_CanAccept(void);
 bool LoRaWanUplinkService_IsJoined(void);
 
+/* Safe live-apply entry point; call only when IsRadioCritical() is false. */
+bool LoRaWanUplinkService_ApplyRadioPolicy(
+    const bolus_runtime_config_t *config);
+
 /* Exact service state used by the low-power/application scheduler. */
 bool LoRaWanUplinkService_HasPendingControlResponse(void);
 bool LoRaWanUplinkService_IsRadioCritical(void);

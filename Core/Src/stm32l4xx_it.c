@@ -128,5 +128,6 @@ void SysTick_Handler(void)
 void EXTI15_10_IRQHandler(void)
 {
     HAL_GPIO_EXTI_IRQHandler(RFM_DIO0_Pin);
+    HAL_GPIO_EXTI_IRQHandler(TMP_INT_Pin);
 }
 /* USER CODE END 1 */

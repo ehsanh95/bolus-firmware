@@ -50,6 +50,7 @@ typedef struct
     /* Native BMA456 telemetry cache. Never sourced from MPU6050. */
     bool bma456_valid;
     uint32_t bma_step_count;
+    uint16_t bma_step_delta;
     int16_t bma_accel_x_mg;
     int16_t bma_accel_y_mg;
     int16_t bma_accel_z_mg;
@@ -68,6 +69,10 @@ bool TelemetryWindow_IsDue(
     const telemetry_window_service_t *service,
     uint32_t now_ms);
 
+telemetry_window_status_t TelemetryWindow_ApplyConfig(
+    telemetry_window_service_t *service,
+    const bolus_runtime_config_t *config);
+
 void TelemetryWindow_RecordEpisodeAction(
     telemetry_window_service_t *service,
     const event_episode_action_t *action);
@@ -83,6 +88,7 @@ void TelemetryWindow_RecordMpuBurst(
 void TelemetryWindow_RecordBma456(
     telemetry_window_service_t *service,
     uint32_t step_count,
+    uint16_t step_delta,
     int16_t accel_x_mg,
     int16_t accel_y_mg,
     int16_t accel_z_mg);

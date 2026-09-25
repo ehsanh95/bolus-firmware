@@ -247,6 +247,135 @@ function bolusDecodeTelemetryV2_2(bytes) {
   };
 }
 
+function bolusI8(value) {
+  return (value & 0x80) ? value - 0x100 : value;
+}
+
+function bolusDecodeV3Digest(bytes, offset) {
+  var flags = bytes[offset + 10];
+  return {
+    start_offset_s: bolusU16Le(bytes, offset),
+    duration_s: bytes[offset + 2] * 5,
+    pulse_count: bytes[offset + 3],
+    mean_inter_pulse_interval_s: bytes[offset + 4],
+    temperature_change_c: bolusI8(bytes[offset + 5]) / 10,
+    rms_dynamic_accel_mg: bytes[offset + 6] * 20,
+    peak_dynamic_accel_mg: bytes[offset + 7] * 20,
+    peak_angular_velocity_dps: bytes[offset + 8] * 10,
+    orientation_change_deg: bytes[offset + 9] * 2,
+    flags: {
+      raw: bolusHex(flags, 2),
+      motion: !!(flags & 0x01),
+      temperature_high: !!(flags & 0x02),
+      temperature_low: !!(flags & 0x04),
+      mpu_used: !!(flags & 0x08),
+      mpu_skipped_by_policy: !!(flags & 0x10),
+      temperature_valid: !!(flags & 0x20),
+      mpu_failed: !!(flags & 0x40),
+      carry_from_previous_window: !!(flags & 0x80)
+    }
+  };
+}
+
+function bolusDecodeTelemetryV3(bytes) {
+  if (!bytes || bytes.length < 5) {
+    return { error: 'Telemetry V3 payload is too short.' };
+  }
+
+  var version = (bytes[0] >> 4) & 0x0F;
+  var messageType = bytes[0] & 0x0F;
+  if (version !== 5) {
+    return { error: 'Unsupported Telemetry V3 wire version: ' + version + '.' };
+  }
+
+  if (messageType === 1) {
+    if (bytes.length < 18 || ((bytes.length - 18) % 11) !== 0) {
+      return { error: 'Telemetry V3 summary length is invalid.' };
+    }
+    var status = bytes[4];
+    var recordCount = (bytes.length - 18) / 11;
+    if (recordCount > 3) {
+      return { error: 'Telemetry V3 summary contains too many Episode records.' };
+    }
+    var episodes = [];
+    for (var i = 0; i < recordCount; i++) {
+      episodes.push(bolusDecodeV3Digest(bytes, 18 + (i * 11)));
+    }
+    return {
+      data: {
+        version: 'V3',
+        protocol: {
+          version: 5,
+          message_type: 1,
+          message_name: 'summary_v3',
+          payload_size_bytes: bytes.length,
+          sequence: bolusU16Le(bytes, 1),
+          runtime_config_version: bytes[3]
+        },
+        status: {
+          raw: bolusHex(status, 2),
+          temperature_valid: !!(status & 0x01),
+          motion_valid: !!(status & 0x02),
+          event_digest_overflow: !!(status & 0x04),
+          fault_present: !!(status & 0x10),
+          health_degraded: !!(status & 0x20),
+          health_critical: !!(status & 0x40),
+          continuation_expected: !!(status & 0x80)
+        },
+        acquisition_level: bytes[5] & 0x07,
+        custom_profile: !!(bytes[5] & 0x80),
+        battery: { voltage_mv: bolusU16Le(bytes, 6) },
+        temperature: {
+          current_c: bolusI16Le(bytes, 8) / 100,
+          min_c: bolusI16Le(bytes, 10) / 100,
+          max_c: bolusI16Le(bytes, 12) / 100
+        },
+        activity: {
+          steps_delta: bolusU16Le(bytes, 14),
+          closed_episode_count: bytes[16],
+          suppressed_trigger_count: bytes[17]
+        },
+        episodes: episodes
+      }
+    };
+  }
+
+  if (messageType === 2) {
+    if (bytes.length < 5 || ((bytes.length - 5) % 11) !== 0) {
+      return { error: 'Telemetry V3 continuation length is invalid.' };
+    }
+    var declaredCount = bytes[4] & 0x7F;
+    var continuationCount = (bytes.length - 5) / 11;
+    if (declaredCount !== continuationCount || continuationCount > 4) {
+      return { error: 'Telemetry V3 continuation Episode count mismatch.' };
+    }
+    var continuedEpisodes = [];
+    for (var j = 0; j < continuationCount; j++) {
+      continuedEpisodes.push(bolusDecodeV3Digest(bytes, 5 + (j * 11)));
+    }
+    return {
+      data: {
+        version: 'V3',
+        protocol: {
+          version: 5,
+          message_type: 2,
+          message_name: 'episode_continuation_v3',
+          payload_size_bytes: bytes.length,
+          sequence: bolusU16Le(bytes, 1)
+        },
+        continuation: {
+          packet_index: bytes[3],
+          more: !!(bytes[4] & 0x80),
+          episode_count: declaredCount
+        },
+        episodes: continuedEpisodes
+      }
+    };
+  }
+
+  return { error: 'Unsupported Telemetry V3 message type: ' + messageType + '.' };
+}
+
 function bolusDecodeTelemetry(bytes) {
   if (!bytes || bytes.length === 0) {
     return { error: 'Telemetry payload is empty.' };
@@ -261,6 +390,9 @@ function bolusDecodeTelemetry(bytes) {
   }
   if (version === 4) {
     return bolusDecodeTelemetryV2_2(bytes);
+  }
+  if (version === 5) {
+    return bolusDecodeTelemetryV3(bytes);
   }
   return { error: 'Unsupported telemetry version: ' + version + '.' };
 }
@@ -301,6 +433,7 @@ function bolusDecodeControlUplink(bytes) {
   if (mask & (1 << 3)) pending.push('MPU_SENSOR');
   if (mask & (1 << 4)) pending.push('TELEMETRY_WINDOW');
   if (mask & (1 << 5)) pending.push('RADIO_POLICY');
+  if (mask & (1 << 6)) pending.push('TMP_SENSOR');
 
   return {
     data: {

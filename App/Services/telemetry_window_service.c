@@ -72,6 +72,18 @@ bool TelemetryWindow_IsDue(
     return ((now_ms - service->window_start_ms) >= service->uplink_period_ms);
 }
 
+telemetry_window_status_t TelemetryWindow_ApplyConfig(
+    telemetry_window_service_t *service,
+    const bolus_runtime_config_t *config)
+{
+    if ((service == NULL) || (config == NULL))
+        return TELEMETRY_WINDOW_ERROR_PARAM;
+    if ((!service->initialized) || (!BolusRuntimeConfig_Validate(config)))
+        return TELEMETRY_WINDOW_ERROR_CONFIG;
+    service->uplink_period_ms = config->radio.uplink_period_s * 1000UL;
+    return TELEMETRY_WINDOW_OK;
+}
+
 void TelemetryWindow_RecordEpisodeAction(
     telemetry_window_service_t *service,
     const event_episode_action_t *action)
@@ -196,6 +208,7 @@ void TelemetryWindow_RecordMpuBurst(
 void TelemetryWindow_RecordBma456(
     telemetry_window_service_t *service,
     uint32_t step_count,
+    uint16_t step_delta,
     int16_t accel_x_mg,
     int16_t accel_y_mg,
     int16_t accel_z_mg)
@@ -207,6 +220,7 @@ void TelemetryWindow_RecordBma456(
 
     service->bma456_valid = true;
     service->bma_step_count = step_count;
+    service->bma_step_delta = step_delta;
     service->bma_accel_x_mg = accel_x_mg;
     service->bma_accel_y_mg = accel_y_mg;
     service->bma_accel_z_mg = accel_z_mg;

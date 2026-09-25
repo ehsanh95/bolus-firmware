@@ -14,6 +14,7 @@
 
 #include "rfm95w_board.h"
 #include "bolus_config.h"
+#include "tmp_irq_diag.h"
 
 #include <stddef.h>
 
@@ -219,6 +220,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     else if (GPIO_Pin == RFM_DIO2_Pin)
     {
         s_rfm95w_pending_dio_mask |= RFM95W_PENDING_DIO2;
+    }
+    else if (GPIO_Pin == TMP_INT_Pin)
+    {
+        TmpIrqDiag_OnGpioExti(GPIO_Pin);
     }
 }
 

@@ -117,4 +117,27 @@ typedef struct
  */
 typedef bolus_telemetry_summary_v2_1_t bolus_telemetry_summary_v2_2_t;
 
+typedef struct
+{
+    uint16_t start_offset_s;
+    uint16_t duration_s;
+    uint8_t pulse_count;
+    uint8_t mean_inter_pulse_interval_s;
+    int16_t temperature_delta_centi_c;
+    uint16_t rms_dynamic_accel_mg;
+    uint16_t peak_dynamic_accel_mg;
+    uint16_t peak_angular_velocity_dps;
+    uint16_t orientation_change_cdeg;
+    uint8_t flags;
+} bolus_event_digest_t;
+
+#define BOLUS_EVENT_DIGEST_FLAG_MOTION          (1U << 0)
+#define BOLUS_EVENT_DIGEST_FLAG_TEMP_HIGH       (1U << 1)
+#define BOLUS_EVENT_DIGEST_FLAG_TEMP_LOW        (1U << 2)
+#define BOLUS_EVENT_DIGEST_FLAG_MPU_USED        (1U << 3)
+#define BOLUS_EVENT_DIGEST_FLAG_MPU_SKIPPED     (1U << 4)
+#define BOLUS_EVENT_DIGEST_FLAG_TEMP_VALID      (1U << 5)
+#define BOLUS_EVENT_DIGEST_FLAG_MPU_FAILED      (1U << 6)
+#define BOLUS_EVENT_DIGEST_FLAG_CARRY           (1U << 7)
+
 #endif /* TELEMETRY_DATA_H */

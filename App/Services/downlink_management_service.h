@@ -40,6 +40,7 @@ typedef uint16_t downlink_apply_mask_t;
 #define DOWNLINK_APPLY_MPU_SENSOR            ((downlink_apply_mask_t)(1U << 3))
 #define DOWNLINK_APPLY_TELEMETRY_WINDOW      ((downlink_apply_mask_t)(1U << 4))
 #define DOWNLINK_APPLY_RADIO_POLICY          ((downlink_apply_mask_t)(1U << 5))
+#define DOWNLINK_APPLY_TMP_SENSOR             ((downlink_apply_mask_t)(1U << 6))
 
 /*
  * Request format (little-endian values):
@@ -72,7 +73,12 @@ typedef enum
     DOWNLINK_CMD_SET_RF_CODING_RATE = 0x0D,
     DOWNLINK_CMD_SET_RF_TX_TIMEOUT_MS = 0x0E,
     DOWNLINK_CMD_SET_RF_RETRY_DELAY_MS = 0x0F,
-    DOWNLINK_CMD_SET_RF_MAX_TX_ATTEMPTS = 0x10
+    DOWNLINK_CMD_SET_RF_MAX_TX_ATTEMPTS = 0x10,
+    DOWNLINK_CMD_SET_ACQUISITION_LEVEL = 0x11,
+    DOWNLINK_CMD_SET_TMP_ALERT_ENABLE = 0x12,
+    DOWNLINK_CMD_SET_TMP_HIGH_LIMIT = 0x13,
+    DOWNLINK_CMD_SET_TMP_LOW_LIMIT = 0x14,
+    DOWNLINK_CMD_SET_TMP_CONVERSION_CYCLE = 0x15
 } downlink_command_id_t;
 
 typedef enum

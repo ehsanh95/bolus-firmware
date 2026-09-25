@@ -14,6 +14,8 @@
 #define SENSOR_SERVICE_TMP_POLL_MS                2U
 #define SENSOR_SERVICE_TMP_DEVICE_ID_EXPECTED     0x0117U
 #define SENSOR_SERVICE_TMP_DRDY_MASK              (1U << 13)
+#define SENSOR_SERVICE_TMP_HIGH_ALERT_MASK        (1U << 15)
+#define SENSOR_SERVICE_TMP_LOW_ALERT_MASK         (1U << 14)
 #define SENSOR_SERVICE_MPU_POWER_STABILIZE_MS    10U
 #define SENSOR_SERVICE_GRAVITY_MG                 1000UL
 
@@ -30,6 +32,8 @@ static uint8_t s_tmp_buffer[3] = {0};
 static uint16_t s_tmp_device_id = 0U;
 static uint8_t s_tmp_averaging_samples = 1U;
 static uint32_t s_tmp_conversion_timeout_ms = 50U;
+static bool s_tmp_continuous_mode = false;
+static uint8_t s_tmp_conversion_cycle = 7U;
 
 static bool s_mpu_ready = false;
 static I2C_HandleTypeDef *s_mpu_i2c = NULL;
@@ -319,25 +323,9 @@ sensor_service_status_t SensorService_InitTemperature(
     I2C_HandleTypeDef *hi2c,
     const bolus_runtime_config_t *config)
 {
-    TMP117_AVG_MODE averaging_mode;
-    uint32_t conversion_timeout_ms;
     bool ok;
-
-    if ((hi2c == NULL) || (config == NULL))
-    {
-        return SENSOR_SERVICE_ERROR_PARAM;
-    }
-
+    if ((hi2c == NULL) || (config == NULL)) return SENSOR_SERVICE_ERROR_PARAM;
     if (!BolusRuntimeConfig_Validate(config))
-    {
-        FaultManager_Raise(BOLUS_FAULT_CONFIG_INVALID);
-        return SENSOR_SERVICE_ERROR_CONFIG;
-    }
-
-    if (!MapTmpAveraging(
-            config->temperature.averaging_samples,
-            &averaging_mode,
-            &conversion_timeout_ms))
     {
         FaultManager_Raise(BOLUS_FAULT_CONFIG_INVALID);
         return SENSOR_SERVICE_ERROR_CONFIG;
@@ -346,89 +334,71 @@ sensor_service_status_t SensorService_InitTemperature(
     s_tmp_ready = false;
     s_tmp_i2c = hi2c;
     s_tmp_device_id = 0U;
-    s_tmp_averaging_samples = config->temperature.averaging_samples;
-    s_tmp_conversion_timeout_ms = conversion_timeout_ms;
+    s_tmp_continuous_mode = false;
 
     BolusPower_On(BOLUS_POWER_TMP117);
     HAL_Delay(SENSOR_SERVICE_TMP_POWER_STABILIZE_MS);
 
     ok = TMP117_Init(s_tmp_i2c, s_tmp_buffer);
-    if (!ok)
+    if (!ok ||
+        !TMP117_getDeviceID(s_tmp_i2c, s_tmp_buffer, &s_tmp_device_id) ||
+        (s_tmp_device_id != SENSOR_SERVICE_TMP_DEVICE_ID_EXPECTED))
     {
         FaultManager_Raise(BOLUS_FAULT_TMP117_COMM);
         return SENSOR_SERVICE_ERROR_TMP_INIT;
     }
-
-    ok = TMP117_getDeviceID(
-        s_tmp_i2c,
-        s_tmp_buffer,
-        &s_tmp_device_id);
-
-    if ((!ok) || (s_tmp_device_id != SENSOR_SERVICE_TMP_DEVICE_ID_EXPECTED))
-    {
-        FaultManager_Raise(BOLUS_FAULT_TMP117_COMM);
-        return SENSOR_SERVICE_ERROR_TMP_INIT;
-    }
-
-    ok = TMP117_setAveraging(
-        s_tmp_i2c,
-        s_tmp_buffer,
-        averaging_mode);
-
-    if (!ok)
-    {
-        FaultManager_Raise(BOLUS_FAULT_TMP117_COMM);
-        return SENSOR_SERVICE_ERROR_TMP_INIT;
-    }
-
-    if (config->temperature.alert_enable)
-    {
-        ok = TMP117_setHighLimitTemperature(
-            s_tmp_i2c,
-            s_tmp_buffer,
-            ((double)config->temperature.high_limit_centi_c) / 100.0);
-
-        if (ok)
-        {
-            ok = TMP117_setLowLimitTemperature(
-                s_tmp_i2c,
-                s_tmp_buffer,
-                ((double)config->temperature.low_limit_centi_c) / 100.0);
-        }
-
-        if (ok)
-        {
-            ok = TMP117_setAlertMode(
-                s_tmp_i2c,
-                s_tmp_buffer,
-                TMP117_ALERT_MODE);
-        }
-
-        if (!ok)
-        {
-            FaultManager_Raise(BOLUS_FAULT_TMP117_COMM);
-            return SENSOR_SERVICE_ERROR_TMP_INIT;
-        }
-    }
-
-    ok = TMP117_setConversionMode(
-        s_tmp_i2c,
-        s_tmp_buffer,
-        TMP117_SD_MODE);
-
-    if (!ok)
-    {
-        FaultManager_Raise(BOLUS_FAULT_TMP117_COMM);
-        return SENSOR_SERVICE_ERROR_TMP_INIT;
-    }
-
-    (void)FaultManager_ClearFault(BOLUS_FAULT_TMP117_COMM);
-    (void)FaultManager_ClearFault(BOLUS_FAULT_TMP117_TIMEOUT);
-    (void)FaultManager_ClearFault(BOLUS_FAULT_TMP117_INVALID_DATA);
-    (void)FaultManager_ClearFault(BOLUS_FAULT_CONFIG_INVALID);
 
     s_tmp_ready = true;
+    if (SensorService_ApplyTemperatureConfig(config) != SENSOR_SERVICE_OK)
+    {
+        s_tmp_ready = false;
+        return SENSOR_SERVICE_ERROR_TMP_INIT;
+    }
+    return SENSOR_SERVICE_OK;
+}
 
+sensor_service_status_t SensorService_ApplyTemperatureConfig(
+    const bolus_runtime_config_t *config)
+{
+    TMP117_AVG_MODE avg;
+    uint32_t timeout_ms;
+    bool sentinel;
+    bool ok;
+
+    if ((config == NULL) || (!s_tmp_ready) || (s_tmp_i2c == NULL))
+        return SENSOR_SERVICE_ERROR_PARAM;
+    if (!BolusRuntimeConfig_Validate(config) ||
+        !MapTmpAveraging(config->temperature.averaging_samples, &avg, &timeout_ms))
+        return SENSOR_SERVICE_ERROR_CONFIG;
+
+    sentinel = config->temperature.alert_enable &&
+        (config->temperature.strategy == BOLUS_TEMP_STRATEGY_HYBRID) &&
+        (config->acquisition_level != BOLUS_ACQUISITION_LEVEL_0);
+
+    s_tmp_averaging_samples = config->temperature.averaging_samples;
+    s_tmp_conversion_timeout_ms = timeout_ms;
+    s_tmp_conversion_cycle = config->temperature.conversion_cycle;
+
+    ok = TMP117_setAveraging(s_tmp_i2c, s_tmp_buffer, avg);
+    if (ok) ok = TMP117_setConversionTime(
+        s_tmp_i2c, s_tmp_buffer, (TMP117_CONV_TIME)s_tmp_conversion_cycle);
+    if (ok && config->temperature.alert_enable) ok = TMP117_setHighLimitTemperature(
+        s_tmp_i2c, s_tmp_buffer, ((double)config->temperature.high_limit_centi_c)/100.0);
+    if (ok && config->temperature.alert_enable) ok = TMP117_setLowLimitTemperature(
+        s_tmp_i2c, s_tmp_buffer, ((double)config->temperature.low_limit_centi_c)/100.0);
+    if (ok && config->temperature.alert_enable)
+        ok = TMP117_setAlertMode(s_tmp_i2c, s_tmp_buffer, TMP117_ALERT_MODE);
+    if (ok) ok = TMP117_setConversionMode(
+        s_tmp_i2c, s_tmp_buffer, sentinel ? TMP117_CC_MODE : TMP117_SD_MODE);
+
+    if (!ok)
+    {
+        FaultManager_Raise(BOLUS_FAULT_TMP117_COMM);
+        return SENSOR_SERVICE_ERROR_TMP_INIT;
+    }
+    s_tmp_continuous_mode = sentinel;
+    (void)FaultManager_ClearFault(BOLUS_FAULT_TMP117_COMM);
+    (void)FaultManager_ClearFault(BOLUS_FAULT_CONFIG_INVALID);
     return SENSOR_SERVICE_OK;
 }
 
@@ -440,108 +410,79 @@ sensor_service_status_t SensorService_ReadTemperatureOneShot(
     double temperature_c = 0.0;
     bool ok;
 
-    if (sample == NULL)
-    {
-        return SENSOR_SERVICE_ERROR_PARAM;
-    }
-
-    sample->temperature_mdeg_c = 0;
+    if (sample == NULL) return SENSOR_SERVICE_ERROR_PARAM;
+    memset(sample, 0, sizeof(*sample));
     sample->device_id = s_tmp_device_id;
     sample->averaging_samples = s_tmp_averaging_samples;
+    if ((!s_tmp_ready) || (s_tmp_i2c == NULL)) return SENSOR_SERVICE_ERROR_TMP_READ;
 
-    if ((!s_tmp_ready) || (s_tmp_i2c == NULL))
+    if (!s_tmp_continuous_mode)
     {
-        FaultManager_Raise(BOLUS_FAULT_TMP117_COMM);
-        return SENSOR_SERVICE_ERROR_TMP_READ;
-    }
-
-    ok = TMP117_setConversionMode(
-        s_tmp_i2c,
-        s_tmp_buffer,
-        TMP117_OS_MODE);
-
-    if (!ok)
-    {
-        FaultManager_Raise(BOLUS_FAULT_TMP117_COMM);
-        return SENSOR_SERVICE_ERROR_TMP_READ;
-    }
-
-    start_tick = HAL_GetTick();
-
-    while (true)
-    {
-        ok = TMP117_getConfig(
-            s_tmp_i2c,
-            s_tmp_buffer,
-            &config_reg);
-
-        if (!ok)
-        {
-            (void)TMP117_setConversionMode(
-                s_tmp_i2c,
-                s_tmp_buffer,
-                TMP117_SD_MODE);
-
-            FaultManager_Raise(BOLUS_FAULT_TMP117_COMM);
+        if (!TMP117_setConversionMode(s_tmp_i2c, s_tmp_buffer, TMP117_OS_MODE))
             return SENSOR_SERVICE_ERROR_TMP_READ;
-        }
-
-        if ((config_reg & SENSOR_SERVICE_TMP_DRDY_MASK) != 0U)
+        start_tick = HAL_GetTick();
+        while (true)
         {
-            break;
+            ok = TMP117_getConfig(s_tmp_i2c, s_tmp_buffer, &config_reg);
+            if (!ok)
+            {
+                (void)TMP117_setConversionMode(s_tmp_i2c,s_tmp_buffer,TMP117_SD_MODE);
+                return SENSOR_SERVICE_ERROR_TMP_READ;
+            }
+            if ((config_reg & SENSOR_SERVICE_TMP_DRDY_MASK) != 0U) break;
+            if ((HAL_GetTick()-start_tick) >= s_tmp_conversion_timeout_ms)
+            {
+                (void)TMP117_setConversionMode(s_tmp_i2c,s_tmp_buffer,TMP117_SD_MODE);
+                FaultManager_Raise(BOLUS_FAULT_TMP117_TIMEOUT);
+                return SENSOR_SERVICE_ERROR_TMP_TIMEOUT;
+            }
+            HAL_Delay(SENSOR_SERVICE_TMP_POLL_MS);
         }
-
-        if ((HAL_GetTick() - start_tick) >= s_tmp_conversion_timeout_ms)
-        {
-            (void)TMP117_setConversionMode(
-                s_tmp_i2c,
-                s_tmp_buffer,
-                TMP117_SD_MODE);
-
-            FaultManager_Raise(BOLUS_FAULT_TMP117_TIMEOUT);
-            return SENSOR_SERVICE_ERROR_TMP_TIMEOUT;
-        }
-
-        HAL_Delay(SENSOR_SERVICE_TMP_POLL_MS);
     }
 
-    ok = TMP117_getResultTemperature(
-        s_tmp_i2c,
-        s_tmp_buffer,
-        &temperature_c);
-
-    (void)TMP117_setConversionMode(
-        s_tmp_i2c,
-        s_tmp_buffer,
-        TMP117_SD_MODE);
-
-    if (!ok)
-    {
-        FaultManager_Raise(BOLUS_FAULT_TMP117_COMM);
-        return SENSOR_SERVICE_ERROR_TMP_READ;
-    }
-
+    ok = TMP117_getResultTemperature(s_tmp_i2c, s_tmp_buffer, &temperature_c);
+    if (!s_tmp_continuous_mode)
+        (void)TMP117_setConversionMode(s_tmp_i2c,s_tmp_buffer,TMP117_SD_MODE);
+    if (!ok) return SENSOR_SERVICE_ERROR_TMP_READ;
     if ((temperature_c < -55.0) || (temperature_c > 150.0))
-    {
-        FaultManager_Raise(BOLUS_FAULT_TMP117_INVALID_DATA);
         return SENSOR_SERVICE_ERROR_TMP_INVALID_DATA;
-    }
 
     sample->temperature_mdeg_c = TemperatureCToMilliC(temperature_c);
-    sample->device_id = s_tmp_device_id;
-    sample->averaging_samples = s_tmp_averaging_samples;
-
     (void)FaultManager_ClearFault(BOLUS_FAULT_TMP117_COMM);
     (void)FaultManager_ClearFault(BOLUS_FAULT_TMP117_TIMEOUT);
     (void)FaultManager_ClearFault(BOLUS_FAULT_TMP117_INVALID_DATA);
-
     return SENSOR_SERVICE_OK;
 }
 
-bool SensorService_IsTemperatureReady(void)
+sensor_service_status_t SensorService_ReadTemperatureAlert(
+    sensor_service_temperature_alert_t *alert)
 {
-    return s_tmp_ready;
+    double temperature_c = 0.0;
+    if (alert == NULL) return SENSOR_SERVICE_ERROR_PARAM;
+    memset(alert, 0, sizeof(*alert));
+    alert->sample.device_id = s_tmp_device_id;
+    alert->sample.averaging_samples = s_tmp_averaging_samples;
+    if ((!s_tmp_ready) || (!s_tmp_continuous_mode) || (s_tmp_i2c == NULL))
+        return SENSOR_SERVICE_ERROR_CONFIG;
+
+    if (!TMP117_getConfig(s_tmp_i2c,s_tmp_buffer,&alert->config_reg))
+        return SENSOR_SERVICE_ERROR_TMP_READ;
+    alert->high_alert =
+        ((alert->config_reg & SENSOR_SERVICE_TMP_HIGH_ALERT_MASK) != 0U);
+    alert->low_alert =
+        ((alert->config_reg & SENSOR_SERVICE_TMP_LOW_ALERT_MASK) != 0U);
+    if (!TMP117_getResultTemperature(s_tmp_i2c,s_tmp_buffer,&temperature_c))
+        return SENSOR_SERVICE_ERROR_TMP_READ;
+    if ((temperature_c < -55.0) || (temperature_c > 150.0))
+        return SENSOR_SERVICE_ERROR_TMP_INVALID_DATA;
+
+    alert->sample.temperature_mdeg_c = TemperatureCToMilliC(temperature_c);
+    return SENSOR_SERVICE_OK;
 }
+
+bool SensorService_IsTemperatureReady(void){return s_tmp_ready;}
+bool SensorService_IsTemperatureSentinelActive(void)
+{return s_tmp_ready && s_tmp_continuous_mode;}
 
 sensor_service_status_t SensorService_InitMpu(
     I2C_HandleTypeDef *hi2c,

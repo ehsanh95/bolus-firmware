@@ -42,6 +42,14 @@ typedef struct
 
 typedef struct
 {
+    sensor_service_temperature_sample_t sample;
+    bool high_alert;
+    bool low_alert;
+    uint16_t config_reg;
+} sensor_service_temperature_alert_t;
+
+typedef struct
+{
     int16_t accel_x_mg;
     int16_t accel_y_mg;
     int16_t accel_z_mg;
@@ -99,7 +107,14 @@ sensor_service_status_t SensorService_InitTemperature(
 sensor_service_status_t SensorService_ReadTemperatureOneShot(
     sensor_service_temperature_sample_t *sample);
 
+sensor_service_status_t SensorService_ApplyTemperatureConfig(
+    const bolus_runtime_config_t *config);
+
+sensor_service_status_t SensorService_ReadTemperatureAlert(
+    sensor_service_temperature_alert_t *alert);
+
 bool SensorService_IsTemperatureReady(void);
+bool SensorService_IsTemperatureSentinelActive(void);
 
 /*
  * MPU6050 high-detail motion path.

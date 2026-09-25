@@ -38,7 +38,8 @@ typedef enum
 {
     LORAWAN_TX_KIND_NONE = 0,
     LORAWAN_TX_KIND_TELEMETRY,
-    LORAWAN_TX_KIND_CONTROL_RESPONSE
+    LORAWAN_TX_KIND_CONTROL_RESPONSE,
+    LORAWAN_TX_KIND_MAC_FLUSH
 } lorawan_tx_kind_t;
 
 static lorawan_uplink_queue_entry_t s_queue[BOLUS_LORAWAN_QUEUE_DEPTH];
@@ -65,6 +66,9 @@ static uint32_t s_tx_watchdog_deadline_ms = 0U;
 static uint32_t s_next_action_tick_ms = 0U;
 static uint32_t s_retry_delay_ms = 2000U;
 static uint8_t s_max_tx_attempts = 3U;
+static uint8_t s_mac_flush_attempts = 0U;
+static int8_t s_requested_datarate = DR_5;
+static int8_t s_requested_tx_power = 3;
 
 static uint8_t s_f_nwk_s_int_key[16] = BOLUS_LORAWAN_F_NWK_S_INT_KEY_BYTES;
 static uint8_t s_s_nwk_s_int_key[16] = BOLUS_LORAWAN_S_NWK_S_INT_KEY_BYTES;
@@ -246,6 +250,42 @@ static void MacMcpsConfirm(McpsConfirm_t *confirm)
         return;
     }
 
+    if (completed_kind == LORAWAN_TX_KIND_MAC_FLUSH)
+    {
+        if (confirm->Status == LORAMAC_EVENT_INFO_STATUS_OK)
+        {
+            s_mac_flush_attempts = 0U;
+            (void)FaultManager_ClearFault(BOLUS_FAULT_RF_TX_TIMEOUT);
+            s_next_action_tick_ms = HAL_GetTick();
+            lorawan_uplink_service_diag.state =
+                LORAWAN_UPLINK_STATE_JOINED_IDLE;
+        }
+        else
+        {
+            lorawan_uplink_service_diag.tx_failure_count++;
+            if (s_mac_flush_attempts < s_max_tx_attempts)
+            {
+                s_next_action_tick_ms =
+                    HAL_GetTick() + s_retry_delay_ms;
+                lorawan_uplink_service_diag.next_action_tick_ms =
+                    s_next_action_tick_ms;
+                lorawan_uplink_service_diag.state =
+                    LORAWAN_UPLINK_STATE_RETRY_WAIT;
+            }
+            else
+            {
+                lorawan_uplink_service_diag.tx_drop_count++;
+                FaultManager_Raise(BOLUS_FAULT_RF_TX_TIMEOUT);
+                QueuePop();
+                s_mac_flush_attempts = 0U;
+                s_next_action_tick_ms = HAL_GetTick();
+                lorawan_uplink_service_diag.state =
+                    LORAWAN_UPLINK_STATE_JOINED_IDLE;
+            }
+        }
+        return;
+    }
+
     if (completed_kind != LORAWAN_TX_KIND_TELEMETRY)
     {
         lorawan_uplink_service_diag.late_mcps_confirm_count++;
@@ -319,7 +359,7 @@ static void RecoverTimedOutTx(void)
     }
 
     if ((recovery_status == LORAMAC_STATUS_OK) &&
-        (!ConfigureMacPolicy() || !ConfigureAbpSession()))
+        (!ConfigureMacPolicy() || !ApplyRadioMib() || !ConfigureAbpSession()))
     {
         recovery_status = lorawan_uplink_service_diag.last_mac_status;
     }
@@ -501,6 +541,90 @@ static bool ConfigureMacPolicy(void)
     return true;
 }
 
+static bool ResolveEu868Datarate(
+    const bolus_runtime_config_t *config,
+    int8_t *datarate)
+{
+    if ((config == NULL) || (datarate == NULL) ||
+        (config->radio.coding_rate != 1U))
+        return false;
+
+    if (config->radio.bandwidth_index == 0U)
+    {
+        switch (config->radio.spreading_factor)
+        {
+            case 12U: *datarate = DR_0; return true;
+            case 11U: *datarate = DR_1; return true;
+            case 10U: *datarate = DR_2; return true;
+            case 9U:  *datarate = DR_3; return true;
+            case 8U:  *datarate = DR_4; return true;
+            case 7U:  *datarate = DR_5; return true;
+            default: return false;
+        }
+    }
+
+    if ((config->radio.bandwidth_index == 1U) &&
+        (config->radio.spreading_factor == 7U))
+    {
+        *datarate = DR_6;
+        return true;
+    }
+
+    return false;
+}
+
+static int8_t ResolveEu868TxPowerIndex(int8_t dbm)
+{
+    /* RuntimeConfig validates exact even values 2..16 dBm. */
+    return (int8_t)((16 - dbm) / 2);
+}
+
+static bool ApplyRadioMib(void)
+{
+    MibParam_t param;
+    LoRaMacStatus_t status;
+
+    memset(&param, 0, sizeof(param));
+    param.ChannelsDatarate = s_requested_datarate;
+    status = SetMib(MIB_CHANNELS_DATARATE, param);
+    if (status != LORAMAC_STATUS_OK)
+    {
+        lorawan_uplink_service_diag.last_mac_status = status;
+        return false;
+    }
+
+    memset(&param, 0, sizeof(param));
+    param.ChannelsTxPower = s_requested_tx_power;
+    status = SetMib(MIB_CHANNELS_TX_POWER, param);
+    lorawan_uplink_service_diag.last_mac_status = status;
+    return (status == LORAMAC_STATUS_OK);
+}
+
+bool LoRaWanUplinkService_ApplyRadioPolicy(
+    const bolus_runtime_config_t *config)
+{
+    int8_t datarate;
+
+    if ((config == NULL) ||
+        !BolusRuntimeConfig_Validate(config) ||
+        s_tx_in_flight ||
+        !ResolveEu868Datarate(config, &datarate))
+    {
+        return false;
+    }
+
+    s_retry_delay_ms = config->radio.retry_delay_ms;
+    s_max_tx_attempts = config->radio.max_tx_attempts;
+    s_requested_datarate = datarate;
+    s_requested_tx_power =
+        ResolveEu868TxPowerIndex(config->radio.tx_power_dbm);
+
+    if (!s_initialized)
+        return true;
+
+    return ApplyRadioMib();
+}
+
 static bool ConfigureAbpSession(void)
 {
     MibParam_t param;
@@ -613,7 +737,7 @@ static void TrySendControlResponse(uint32_t now_ms)
     request.Req.Unconfirmed.fPort = BOLUS_LORAWAN_CONTROL_UPLINK_PORT;
     request.Req.Unconfirmed.fBuffer = s_control_response;
     request.Req.Unconfirmed.fBufferSize = s_control_response_size;
-    request.Req.Unconfirmed.Datarate = DR_0;
+    request.Req.Unconfirmed.Datarate = s_requested_datarate;
 
     /* Keep duty-cycle waiting in this service instead of hiding it in LoRaMAC. */
     status = LoRaMacMcpsRequest(&request, false);
@@ -676,35 +800,163 @@ static void TrySendControlResponse(uint32_t now_ms)
     }
 }
 
+static void TrySendMacCommandsOnly(uint32_t now_ms)
+{
+    McpsReq_t request;
+    LoRaMacStatus_t status;
+
+    if (s_tx_in_flight || !s_joined)
+        return;
+
+    memset(&request, 0, sizeof(request));
+    request.Type = MCPS_UNCONFIRMED;
+    request.Req.Unconfirmed.fPort = BOLUS_LORAWAN_APP_PORT;
+    request.Req.Unconfirmed.fBuffer = NULL;
+    request.Req.Unconfirmed.fBufferSize = 0U;
+    request.Req.Unconfirmed.Datarate = s_requested_datarate;
+
+    status = LoRaMacMcpsRequest(&request, false);
+    lorawan_uplink_service_diag.last_mac_status = status;
+
+    if (status == LORAMAC_STATUS_OK)
+    {
+        s_mac_flush_attempts++;
+        s_tx_in_flight = true;
+        s_tx_kind = LORAWAN_TX_KIND_MAC_FLUSH;
+        lorawan_uplink_service_diag.tx_in_flight = true;
+        lorawan_uplink_service_diag.tx_request_count++;
+        lorawan_uplink_service_diag.state =
+            LORAWAN_UPLINK_STATE_TX_IN_FLIGHT;
+        ArmTxWatchdog(now_ms);
+    }
+    else if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED)
+    {
+        s_next_action_tick_ms =
+            now_ms + request.ReqReturn.DutyCycleWaitTime;
+        lorawan_uplink_service_diag.next_action_tick_ms =
+            s_next_action_tick_ms;
+        lorawan_uplink_service_diag.duty_cycle_defer_count++;
+        lorawan_uplink_service_diag.state =
+            LORAWAN_UPLINK_STATE_RETRY_WAIT;
+    }
+    else if (status == LORAMAC_STATUS_BUSY)
+    {
+        s_next_action_tick_ms =
+            now_ms + LORAWAN_UPLINK_BUSY_RETRY_MS;
+        lorawan_uplink_service_diag.next_action_tick_ms =
+            s_next_action_tick_ms;
+        lorawan_uplink_service_diag.mac_busy_defer_count++;
+        lorawan_uplink_service_diag.state =
+            LORAWAN_UPLINK_STATE_RETRY_WAIT;
+    }
+    else if (status == LORAMAC_STATUS_NO_NETWORK_JOINED)
+    {
+        MarkAbpSessionLost(now_ms);
+    }
+    else
+    {
+        s_mac_flush_attempts++;
+        lorawan_uplink_service_diag.tx_failure_count++;
+        if (s_mac_flush_attempts < s_max_tx_attempts)
+        {
+            s_next_action_tick_ms = now_ms + s_retry_delay_ms;
+            lorawan_uplink_service_diag.next_action_tick_ms =
+                s_next_action_tick_ms;
+            lorawan_uplink_service_diag.state =
+                LORAWAN_UPLINK_STATE_RETRY_WAIT;
+        }
+        else
+        {
+            lorawan_uplink_service_diag.tx_drop_count++;
+            FaultManager_Raise(BOLUS_FAULT_RF_COMM);
+            QueuePop();
+            s_mac_flush_attempts = 0U;
+            s_next_action_tick_ms = now_ms;
+            lorawan_uplink_service_diag.state =
+                LORAWAN_UPLINK_STATE_JOINED_IDLE;
+        }
+    }
+}
+
 static void TrySendHead(uint32_t now_ms)
 {
     lorawan_uplink_queue_entry_t *entry = QueueHead();
     McpsReq_t request;
     LoRaMacStatus_t status;
+    LoRaMacTxInfo_t tx_info;
 
     if ((entry == NULL) || s_tx_in_flight || !s_joined)
+        return;
+
+    memset(&tx_info, 0, sizeof(tx_info));
+    status = LoRaMacQueryTxPossible(entry->size, &tx_info);
+    lorawan_uplink_service_diag.last_mac_status = status;
+
+    if (status == LORAMAC_STATUS_LENGTH_ERROR)
     {
+        /*
+         * If the payload itself fits the data rate, pending MAC commands are
+         * consuming FOpts space. Flush them without popping the application
+         * queue, then retry the same V3 packet.
+         */
+        if (entry->size <= tx_info.CurrentPossiblePayloadSize)
+        {
+            TrySendMacCommandsOnly(now_ms);
+            return;
+        }
+
+        entry->attempts++;
+        lorawan_uplink_service_diag.tx_failure_count++;
+        if (entry->attempts >= s_max_tx_attempts)
+        {
+            lorawan_uplink_service_diag.tx_drop_count++;
+            FaultManager_Raise(BOLUS_FAULT_RF_COMM);
+            QueuePop();
+        }
+        s_next_action_tick_ms = now_ms + s_retry_delay_ms;
+        lorawan_uplink_service_diag.next_action_tick_ms =
+            s_next_action_tick_ms;
+        lorawan_uplink_service_diag.state =
+            LORAWAN_UPLINK_STATE_RETRY_WAIT;
+        return;
+    }
+    else if (status == LORAMAC_STATUS_BUSY)
+    {
+        s_next_action_tick_ms = now_ms + LORAWAN_UPLINK_BUSY_RETRY_MS;
+        lorawan_uplink_service_diag.next_action_tick_ms =
+            s_next_action_tick_ms;
+        lorawan_uplink_service_diag.mac_busy_defer_count++;
+        lorawan_uplink_service_diag.state =
+            LORAWAN_UPLINK_STATE_RETRY_WAIT;
+        return;
+    }
+    else if (status != LORAMAC_STATUS_OK)
+    {
+        lorawan_uplink_service_diag.tx_failure_count++;
+        s_next_action_tick_ms = now_ms + s_retry_delay_ms;
+        lorawan_uplink_service_diag.next_action_tick_ms =
+            s_next_action_tick_ms;
+        lorawan_uplink_service_diag.state =
+            LORAWAN_UPLINK_STATE_RETRY_WAIT;
         return;
     }
 
     memset(&request, 0, sizeof(request));
-
 #if (BOLUS_LORAWAN_CONFIRMED_UPLINK != 0)
     request.Type = MCPS_CONFIRMED;
     request.Req.Confirmed.fPort = BOLUS_LORAWAN_APP_PORT;
     request.Req.Confirmed.fBuffer = entry->payload;
     request.Req.Confirmed.fBufferSize = entry->size;
-    request.Req.Confirmed.Datarate = DR_0;
+    request.Req.Confirmed.Datarate = s_requested_datarate;
     request.Req.Confirmed.NbTrials = BOLUS_LORAWAN_CONFIRMED_TRIALS;
 #else
     request.Type = MCPS_UNCONFIRMED;
     request.Req.Unconfirmed.fPort = BOLUS_LORAWAN_APP_PORT;
     request.Req.Unconfirmed.fBuffer = entry->payload;
     request.Req.Unconfirmed.fBufferSize = entry->size;
-    request.Req.Unconfirmed.Datarate = DR_0;
+    request.Req.Unconfirmed.Datarate = s_requested_datarate;
 #endif
 
-    /* Keep duty-cycle waiting in this service instead of hiding it in LoRaMAC. */
     status = LoRaMacMcpsRequest(&request, false);
     lorawan_uplink_service_diag.last_mac_status = status;
 
@@ -715,22 +967,29 @@ static void TrySendHead(uint32_t now_ms)
         s_tx_kind = LORAWAN_TX_KIND_TELEMETRY;
         lorawan_uplink_service_diag.tx_in_flight = true;
         lorawan_uplink_service_diag.tx_request_count++;
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_TX_IN_FLIGHT;
+        lorawan_uplink_service_diag.state =
+            LORAWAN_UPLINK_STATE_TX_IN_FLIGHT;
         ArmTxWatchdog(now_ms);
     }
     else if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED)
     {
-        s_next_action_tick_ms = now_ms + request.ReqReturn.DutyCycleWaitTime;
-        lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
+        s_next_action_tick_ms =
+            now_ms + request.ReqReturn.DutyCycleWaitTime;
+        lorawan_uplink_service_diag.next_action_tick_ms =
+            s_next_action_tick_ms;
         lorawan_uplink_service_diag.duty_cycle_defer_count++;
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_RETRY_WAIT;
+        lorawan_uplink_service_diag.state =
+            LORAWAN_UPLINK_STATE_RETRY_WAIT;
     }
     else if (status == LORAMAC_STATUS_BUSY)
     {
-        s_next_action_tick_ms = now_ms + LORAWAN_UPLINK_BUSY_RETRY_MS;
-        lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
+        s_next_action_tick_ms =
+            now_ms + LORAWAN_UPLINK_BUSY_RETRY_MS;
+        lorawan_uplink_service_diag.next_action_tick_ms =
+            s_next_action_tick_ms;
         lorawan_uplink_service_diag.mac_busy_defer_count++;
-        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_RETRY_WAIT;
+        lorawan_uplink_service_diag.state =
+            LORAWAN_UPLINK_STATE_RETRY_WAIT;
     }
     else if (status == LORAMAC_STATUS_NO_NETWORK_JOINED)
     {
@@ -738,14 +997,17 @@ static void TrySendHead(uint32_t now_ms)
     }
     else
     {
+        entry->attempts++;
         lorawan_uplink_service_diag.tx_failure_count++;
 
         if (entry->attempts < s_max_tx_attempts)
         {
             lorawan_uplink_service_diag.tx_retry_count++;
             s_next_action_tick_ms = now_ms + s_retry_delay_ms;
-            lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
-            lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_RETRY_WAIT;
+            lorawan_uplink_service_diag.next_action_tick_ms =
+                s_next_action_tick_ms;
+            lorawan_uplink_service_diag.state =
+                LORAWAN_UPLINK_STATE_RETRY_WAIT;
         }
         else
         {
@@ -753,7 +1015,8 @@ static void TrySendHead(uint32_t now_ms)
             FaultManager_Raise(BOLUS_FAULT_RF_COMM);
             QueuePop();
             s_next_action_tick_ms = now_ms;
-            lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_JOINED_IDLE;
+            lorawan_uplink_service_diag.state =
+                LORAWAN_UPLINK_STATE_JOINED_IDLE;
         }
     }
 }
@@ -778,6 +1041,7 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
     s_control_response_pending = false;
     s_control_response_size = 0U;
     s_control_response_attempts = 0U;
+    s_mac_flush_attempts = 0U;
     s_joined = false;
     s_tx_in_flight = false;
     s_tx_kind = LORAWAN_TX_KIND_NONE;
@@ -785,6 +1049,10 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
     s_next_action_tick_ms = HAL_GetTick();
     s_retry_delay_ms = config->radio.retry_delay_ms;
     s_max_tx_attempts = config->radio.max_tx_attempts;
+    if (!ResolveEu868Datarate(config, &s_requested_datarate))
+        return LORAWAN_UPLINK_ERROR_CONFIG;
+    s_requested_tx_power =
+        ResolveEu868TxPowerIndex(config->radio.tx_power_dbm);
 
     lorawan_uplink_service_diag.credentials_provisioned =
         (BOLUS_LORAWAN_CREDENTIALS_PROVISIONED != 0);
@@ -826,7 +1094,7 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
         return LORAWAN_UPLINK_ERROR_MAC_INIT;
     }
 
-    if (!ConfigureMacPolicy())
+    if (!ConfigureMacPolicy() || !ApplyRadioMib())
     {
         lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
         FaultManager_Raise(BOLUS_FAULT_RF_COMM);

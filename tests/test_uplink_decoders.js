@@ -35,6 +35,14 @@ const telemetryV2_2 = [
   0xCF, 0x00, 0x3A, 0xFF, 0xBC, 0x03
 ];
 
+const telemetryV3 = [
+  0x51, 0x34, 0x12, 0x0C, 0x03, 0x03, 0x88, 0x0E,
+  0x46, 0x0F, 0x28, 0x0F, 0x50, 0x0F, 0x56, 0x00,
+  0x01, 0x02,
+  0xC8, 0x00, 0x10, 0x03, 0x0F, 0xFD, 0x11, 0x2E,
+  0x12, 0x0E, 0x29
+];
+
 for (const relativePath of decoderPaths) {
   const context = vm.createContext({});
   const source = fs.readFileSync(path.join(repositoryRoot, relativePath), 'utf8');
@@ -79,6 +87,23 @@ for (const relativePath of decoderPaths) {
   assert.ok(!Object.prototype.hasOwnProperty.call(compact.data, 'candidates'));
   assert.ok(!Object.prototype.hasOwnProperty.call(compact.data, 'event_reference_flags'));
   assert.ok(!Object.prototype.hasOwnProperty.call(compact.data.status, 'health_fault'));
+
+  const v3 = context.decodeUplink({ fPort: 2, bytes: telemetryV3 });
+  assert.strictEqual(v3.data.version, 'V3');
+  assert.strictEqual(v3.data.protocol.sequence, 0x1234);
+  assert.strictEqual(v3.data.acquisition_level, 3);
+  assert.strictEqual(v3.data.custom_profile, false);
+  assert.strictEqual(v3.data.status.event_digest_overflow, false);
+  assert.strictEqual(v3.data.activity.steps_delta, 86);
+  assert.strictEqual(v3.data.episodes.length, 1);
+  assert.strictEqual(v3.data.episodes[0].start_offset_s, 200);
+  assert.strictEqual(v3.data.episodes[0].duration_s, 80);
+  assert.strictEqual(v3.data.episodes[0].temperature_change_c, -0.3);
+  assert.strictEqual(v3.data.episodes[0].flags.mpu_used, true);
+
+  const modernAck = context.decodeUplink({ fPort: 4, bytes: [0xD2,0x01,0x33,0x00,0x75,0x00,0x0C,0x00] });
+  assert.ok(modernAck.data.apply_mask.pending_subsystems.includes('TMP_SENSOR'));
+  assert.strictEqual(modernAck.data.runtime_config_version, 12);
 
   const wrongLength = context.decodeUplink({ fPort: 2, bytes: telemetryV2_2.slice(0, 37) });
   assert.match(wrongLength.errors[0], /exactly 38 bytes/);
@@ -129,8 +154,11 @@ const configuratorSupplied = configuratorContext.decodeTelemetry(suppliedTelemet
 assert.strictEqual(configuratorSupplied.temperature.current_c, 24.45);
 const configuratorCompact = configuratorContext.decodeTelemetry(telemetryV2_2);
 assert.strictEqual(configuratorCompact.protocol.version_name, 'V2.2');
+const configuratorV3 = configuratorContext.decodeTelemetry(telemetryV3);
+assert.strictEqual(configuratorV3.protocol.version_name, 'V3');
+assert.strictEqual(configuratorV3.episodes[0].pulse_count, 3);
 assert.strictEqual(configuratorCompact.battery.voltage_mv, 3320);
 assert.ok(!Object.prototype.hasOwnProperty.call(configuratorCompact.battery, 'percent'));
 assert.ok(!Object.prototype.hasOwnProperty.call(configuratorCompact.temperature, 'current_centi_c'));
 
-console.log('Telemetry V2/V2.1/V2.2 encoder/decoder vectors passed.');
+console.log('Telemetry V2/V2.1/V2.2/V3 decoder vectors passed.');

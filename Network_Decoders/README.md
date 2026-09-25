@@ -63,3 +63,17 @@ V2.2 removes the on-air battery percentage, unconnected candidate counters and e
 The two JavaScript files have been syntax-checked and exercised locally with fixed Telemetry V2, Telemetry V2.1, Telemetry V2.2, and ACK/NACK vectors.
 
 This is an **offline codec test**, not a LoRaWAN gateway/hardware PASS. OTAA, over-the-air uplink delivery, network-server execution, RX1/RX2 downlink delivery, and FPort-4 return traffic remain to be validated on the real system.
+
+
+## Telemetry V3
+
+V3 is the active adaptive wire format. Message type 1 (0x51) carries the
+15-minute summary and up to three Episode Digests. Message type 2 (0x52) carries
+continuation Episode Digests with the same window sequence. V2/V2.1/V2.2 remain
+supported for historical devices and regression vectors.
+
+
+V3 decoders also expose `custom_profile` and `event_digest_overflow`.
+These fields must be retained by backend storage so windows collected under an
+advanced override or with incomplete Episode detail are not silently mixed with
+normal preset data.

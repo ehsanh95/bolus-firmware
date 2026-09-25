@@ -95,6 +95,9 @@ bool RadioTxService_IsReady(void);
 bool RadioTxService_CanAccept(void);
 bool RadioTxService_IsBusy(void);
 
+bool RadioTxService_ApplyPolicy(
+    const bolus_runtime_config_t *config);
+
 /* True only while blocking sensor work could disturb active MAC/radio timing. */
 bool RadioTxService_IsRadioCritical(void);
 
