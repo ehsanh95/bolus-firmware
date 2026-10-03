@@ -4,9 +4,12 @@
 #include <stdint.h>
 
 #include "../Application/bolus_types.h"
+
 /** Runtime configuration layout version. Update only when schema changes. */
-#define BOLUS_RUNTIME_CONFIG_VERSION  12U
+#define BOLUS_RUNTIME_CONFIG_VERSION 12U
+
 /** Acquisition presets (0 = minimum background sensing; 5 = most active). */
+
 typedef enum
 {
     BOLUS_ACQUISITION_LEVEL_0=0,
@@ -16,13 +19,17 @@ typedef enum
     BOLUS_ACQUISITION_LEVEL_4,
     BOLUS_ACQUISITION_LEVEL_5
 } bolus_acquisition_level_t;
+
 /** Temperature sampling policy. */
+
 typedef enum
 {
     BOLUS_TEMP_STRATEGY_PERIODIC=0,
     BOLUS_TEMP_STRATEGY_HYBRID
 } bolus_temp_strategy_t;
+
 /** BMA456 output data rate choices. */
+
 typedef enum
 {
     BOLUS_BMA_ODR_6_25_HZ=0,
@@ -30,7 +37,9 @@ typedef enum
     BOLUS_BMA_ODR_25_HZ,
     BOLUS_BMA_ODR_50_HZ
 } bolus_bma_odr_t;
+
 /** Motion-event sensitivity presets, including raw and disabled modes. */
+
 typedef enum
 {
     BOLUS_BMA_EVENT_SENSITIVITY_RAW=0,
@@ -42,13 +51,17 @@ typedef enum
     BOLUS_BMA_EVENT_SENSITIVITY_LEVEL_4,
     BOLUS_BMA_EVENT_SENSITIVITY_OFF
 } bolus_bma_event_sensitivity_t;
+
 /** Rule set used for application-level event interpretation. */
+
 typedef enum
 {
     BOLUS_EVENT_RULES_REFERENCE_BENCHMARK=0,
     BOLUS_EVENT_RULES_FIELD_CALIBRATED
 } bolus_event_rule_source_t;
+
 /** Temperature sampling and high/low alert configuration. */
+
 typedef struct
 {
     uint32_t sample_period_s;
@@ -59,7 +72,9 @@ typedef struct
     int16_t low_limit_centi_c;
     uint8_t conversion_cycle;
 } bolus_temperature_config_t;
+
 /** BMA456 sampling, step counter, FIFO, and motion interrupt configuration. */
+
 typedef struct
 {
     bolus_bma_odr_t odr;
@@ -70,7 +85,9 @@ typedef struct
     bool fifo_enable;
     bool motion_interrupt_enable;
 } bolus_bma_config_t;
+
 /** MPU6050 scheduled acquisition and triggered burst configuration. */
+
 typedef struct
 {
     uint32_t scheduled_period_s;
@@ -80,7 +97,9 @@ typedef struct
     uint16_t gyro_range_dps;
     bool event_trigger_enable;
 } bolus_mpu_config_t;
+
 /** Resolved low-level BMA456 motion interrupt parameters. */
+
 typedef struct
 {
     bool interrupt_enable;
@@ -88,7 +107,9 @@ typedef struct
     uint16_t duration_ms;
     uint16_t cooldown_s;
 } bolus_bma_event_settings_t;
+
 /** Episode detection, follow-up sampling, and event classification thresholds. */
+
 typedef struct
 {
     bool enable;
@@ -119,7 +140,9 @@ typedef struct
     int32_t hyperthermia_reference_mdeg_c;
     int32_t sara_risk_reference_mdeg_c;
 } bolus_event_processing_config_t;
+
 /** Uplink interval and radio transmission policy. */
+
 typedef struct
 {
     /* Periodic uplink interval (seconds). */
@@ -132,7 +155,9 @@ typedef struct
     uint16_t retry_delay_ms;
     uint8_t max_tx_attempts;
 } bolus_radio_config_t;
+
 /** Complete application runtime configuration; field order is stable. */
+
 typedef struct
 {
     uint16_t version;
@@ -144,12 +169,16 @@ typedef struct
     bolus_event_processing_config_t event_processing;
     bolus_radio_config_t radio;
 } bolus_runtime_config_t;
+
 /** Load the startup defaults, then apply acquisition level 3. */
 void BolusRuntimeConfig_LoadDefaults(bolus_runtime_config_t *config);
+
 /** Return true only if all parameter ranges and cross-field rules pass. */
 bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *config);
+
 /** Apply an acquisition preset to the related sensor/event settings. */
 bool BolusRuntimeConfig_ApplyAcquisitionLevel(bolus_runtime_config_t *config, bolus_acquisition_level_t level);
+
 /** Derive BMA motion interrupt thresholds from the configured sensitivity. */
 bool BolusRuntimeConfig_ResolveBmaEventSettings(const bolus_runtime_config_t *config, bolus_bma_event_settings_t *settings);
 #endif
