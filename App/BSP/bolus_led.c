@@ -1,8 +1,13 @@
 #include "bolus_led.h"
+#if (BOLUS_BENCH_LED_DIAGNOSTICS != 0)
 #include "main.h"
+#endif
 
-static void BolusLed_Write(bolus_led_t led, GPIO_PinState state)
+static void BolusLed_Write(bolus_led_t led, bool on)
 {
+#if (BOLUS_BENCH_LED_DIAGNOSTICS != 0)
+    GPIO_PinState state = on ? GPIO_PIN_SET : GPIO_PIN_RESET;
+
     switch (led)
     {
         case BOLUS_LED_SENSOR:
@@ -20,6 +25,10 @@ static void BolusLed_Write(bolus_led_t led, GPIO_PinState state)
         default:
             break;
     }
+#else
+    (void)led;
+    (void)on;
+#endif
 }
 
 void BolusLed_Init(void)
@@ -29,12 +38,12 @@ void BolusLed_Init(void)
 
 void BolusLed_On(bolus_led_t led)
 {
-    BolusLed_Write(led, GPIO_PIN_SET);
+    BolusLed_Write(led, true);
 }
 
 void BolusLed_Off(bolus_led_t led)
 {
-    BolusLed_Write(led, GPIO_PIN_RESET);
+    BolusLed_Write(led, false);
 }
 
 void BolusLed_Set(bolus_led_t led, bool on)
