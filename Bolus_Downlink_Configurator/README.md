@@ -1,13 +1,13 @@
 # Bolus Payload Toolkit
 
-Status: **IMPLEMENTED / OFFLINE TOOLING TESTED / LORAWAN END-TO-END UNTESTED**
+Status: **OFFLINE PROTOCOL TOOLING VERIFIED WITH VECTORS / LIVE DOWNLINK AND APPLY UNDER BENCH VALIDATION**
 
 `Bolus_Downlink_Configurator/index.html` is a dependency-free browser tool for the current Bolus application payload contracts.
 
 It now provides two functions in one fully English offline UI:
 
-1. **Downlink Builder** — creates configuration commands for LoRaWAN **FPort 3**.
-2. **Uplink Decoder** — decodes Telemetry V2/V2.1/V2.2 on **FPort 2** and downlink ACK/NACK responses on **FPort 4**.
+1. **Downlink Builder** — creates validated configuration commands for LoRaWAN **FPort 3**, with acquisition presets preceding explicit overrides and a conservative 51-byte bench payload ceiling.
+2. **Uplink Decoder** — decodes active Telemetry **V3**, legacy V2/V2.1/V2.2 on **FPort 2**, and downlink ACK/NACK responses on **FPort 4**.
 
 No installation, network connection, or device credentials are required.
 
@@ -22,7 +22,7 @@ No installation, network connection, or device credentials are required.
 
 | FPort | Direction | Purpose |
 |---:|---|---|
-| 2 | Bolus -> server | Telemetry V2/V2.1/V2.2 summary |
+| 2 | Bolus -> server | Active Telemetry V3 plus legacy V2/V2.1/V2.2 |
 | 3 | Server -> Bolus | Configuration downlink |
 | 4 | Bolus -> server | Configuration ACK/NACK |
 
@@ -30,7 +30,7 @@ No installation, network connection, or device credentials are required.
 
 The decoder follows the exact firmware encoder in `App/Services/telemetry_codec.c`.
 
-Current active Telemetry V2.2 contract:
+Legacy Telemetry V2.2 contract (active firmware uses variable-length V3 summaries and digest continuation packets):
 
 - fixed size: **38 bytes**;
 - byte 0: version/message header, current summary = `0x41`;
@@ -50,7 +50,7 @@ Frozen V2 (32-byte) and V2.1 (42-byte) payloads remain supported for backward co
 
 ## Downlink Builder
 
-Tick only the settings that must change, select a transaction ID, and press **Generate Payload**.
+Tick only the settings that must change, select a fresh transaction ID for each new request, and press **Generate Payload**. The firmware suppresses only the most recently accepted transaction ID, even if a repeated ID carries different values. Reuse an ID only for intentional duplicate testing. Wait for the FPort 4 response before sending another request.
 
 Outputs:
 
@@ -76,7 +76,9 @@ Current groups:
 - Telemetry period
 - RF / radio policy
 
-BMA Event sensitivity and BMA Step sensitivity are intentionally independent settings.
+BMA Event sensitivity and BMA Step sensitivity are intentionally independent settings. When a packet includes acquisition level and explicit sensor/event overrides, the builder emits the acquisition preset first so the later overrides are not silently reset.
+
+The builder rejects request payloads above **51 bytes** for conservative bench testing; actual delivery limits can be lower depending on regional data rate and MAC options. Split larger edits into separately acknowledged transactions. BW250 requires explicitly selecting SF7 in the same packet. RuntimeConfig performs final whole-configuration validation; the browser cannot know every setting already present on the board.
 
 ## ACK/NACK decoder
 
@@ -91,7 +93,7 @@ byte 4-5  apply mask, little-endian
 byte 6-7  RuntimeConfig version, little-endian
 ```
 
-The UI expands the apply mask into the current pending subsystems:
+The UI expands the response apply mask into subsystems requested by the command. **This is not a snapshot of which hardware settings have actually been applied.** Confirm the device's `pending_apply_mask`, `failed_apply_mask`, and readback/behavior:
 
 - `BMA_EVENT`
 - `BMA_SENSOR`
@@ -99,6 +101,7 @@ The UI expands the apply mask into the current pending subsystems:
 - `MPU_SENSOR`
 - `TELEMETRY_WINDOW`
 - `RADIO_POLICY`
+- `TMP_SENSOR`
 
 ## Network-server decoders
 
@@ -117,16 +120,18 @@ The decoder JavaScript has been syntax-checked and exercised against fixed local
 
 It does **not** prove:
 
-- a clean CubeIDE build of the current LoRaWAN integration;
-- OTAA join with real credentials;
-- gateway/network-server delivery;
+- a clean CubeIDE build for every subsequent firmware change;
+- a fresh LoRaWAN 1.0.3 ABP session after reset (frame counters are not persisted);
+- gateway delivery of the particular downlink under test;
 - RX1/RX2 downlink behavior;
 - FPort 4 ACK/NACK transmission over the air;
 - live application of cached RF/service settings;
 - persistence across reset/power loss;
 - STOP2 / RTC behavior or current consumption.
 
-The LoRaWAN communication path therefore remains **IMPLEMENTED / UNTESTED / NOT HARDWARE VALIDATED** until the corresponding tests are recorded.
+An FPort 2 uplink has been observed on a bench board; do not infer FPort 3 downlink reception, FPort 4 response transmission, RX slot behavior, or hardware apply from that result.
+
+Run `node tests/test_downlink_configurator.js` for offline builder regression coverage. This test is included in `bash tests/run_host_tests.sh` and does not replace live board validation.
 
 ## Sources of truth
 
