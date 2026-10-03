@@ -24,6 +24,8 @@
 #include "bolus_power.h"
 #include "fault_manager.h"
 #include "bolus_led.h"
+#include "bench_led_diagnostics.h"
+#include "lorawan_uplink_service.h"
 #include "battery.h"
 #include "sensor_service.h"
 #include "bma_event_service.h"
@@ -503,6 +505,12 @@ static uint32_t LowPower_ComputeIdleBudget(uint32_t now_ms)
 
 static bool LowPower_CanEnterStop2(void)
 {
+#if (BOLUS_BENCH_LED_DIAGNOSTICS != 0)
+    /* Non-blocking bench pattern display lasts <=620 ms in the main loop.
+     * Production builds and radio-critical intervals are unaffected. */
+    if (BenchLedDiagnostics_IsPresenting(HAL_GetTick()))
+        return false;
+#endif
     if (!low_power_rtc_ready || telemetry_payload_v3_ready)
         return false;
 
@@ -572,6 +580,10 @@ static bool LowPower_TryEnterStop2(uint32_t idle_budget_ms)
         return false;
     }
 
+#if (BOLUS_BENCH_LED_DIAGNOSTICS != 0)
+    /* Drive all LEDs off before STOP2; the RAM fault record survives sleep. */
+    BenchLedDiagnostics_BeforeStop2();
+#endif
     HAL_IWDG_Refresh(&hiwdg);
     tick_before = uwTick;
     HAL_SuspendTick();
@@ -1022,6 +1034,9 @@ int main(void)
   BolusPower_Init();
   BolusLed_Init();
   FaultManager_Init();
+#if (BOLUS_BENCH_LED_DIAGNOSTICS != 0)
+  BenchLedDiagnostics_Init();
+#endif
   battery_status = Battery_Init(&hadc1);
 
   BolusRuntimeConfig_LoadDefaults(&sensor_service_config);
@@ -1393,6 +1408,40 @@ int main(void)
     if (radio_tx_service_ready)
         RadioTxService_Process(HAL_GetTick());
 
+#if (BOLUS_BENCH_LED_DIAGNOSTICS != 0)
+    {
+        /* Read diagnostic counters only in the main loop. No MAC IRQ work. */
+        bench_led_radio_snapshot_t radio_snapshot = {0};
+        radio_snapshot.credentials_provisioned =
+            lorawan_uplink_service_diag.credentials_provisioned;
+        radio_snapshot.session_ready =
+            lorawan_uplink_service_diag.joined &&
+            lorawan_uplink_service_diag.abp_session_configured;
+        radio_snapshot.tx_in_flight =
+            lorawan_uplink_service_diag.tx_in_flight;
+        radio_snapshot.queue_count =
+            lorawan_uplink_service_diag.queue_count;
+        radio_snapshot.tx_request_count =
+            lorawan_uplink_service_diag.tx_request_count;
+        radio_snapshot.tx_success_count =
+            lorawan_uplink_service_diag.tx_success_count;
+        radio_snapshot.tx_failure_count =
+            lorawan_uplink_service_diag.tx_failure_count;
+        radio_snapshot.tx_drop_count =
+            lorawan_uplink_service_diag.tx_drop_count;
+        radio_snapshot.duty_cycle_defer_count =
+            lorawan_uplink_service_diag.duty_cycle_defer_count;
+        radio_snapshot.mac_busy_defer_count =
+            lorawan_uplink_service_diag.mac_busy_defer_count;
+        radio_snapshot.response_tx_success_count =
+            lorawan_uplink_service_diag.downlink_response_tx_success_count;
+        BenchLedDiagnostics_Process(
+            HAL_GetTick(),
+            radio_tx_service_ready && RadioTxService_IsRadioCritical(),
+            telemetry_snapshot_count, &radio_snapshot);
+    }
+#endif
+
     HAL_IWDG_Refresh(&hiwdg);
     now_ms = HAL_GetTick();
 
@@ -1684,6 +1733,10 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   __disable_irq();
+#if (BOLUS_BENCH_LED_DIAGNOSTICS != 0)
+  /* Fatal startup/system failure: LD2 stays on until reset. */
+  BolusLed_On(BOLUS_LED_MCU);
+#endif
   while (1)
   {
   }
