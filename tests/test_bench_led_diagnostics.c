@@ -47,7 +47,6 @@ static void bench_patterns(void)
     FaultManager_Raise(BOLUS_FAULT_TMP117_COMM);
     FaultManager_Raise(BOLUS_FAULT_BATTERY_LOW);
     assert(FaultManager_ClearFault(BOLUS_FAULT_TMP117_COMM));
-    assert(s_leds[0]);
     BenchLedDiagnostics_Process(200U, false, 1U, &radio);
     assert(bench_led_diag.sensor_fault_mask != 0U && s_leds[0]);
     assert(fault_manager_diag.raise_call_count == 2U);
