@@ -11,3 +11,4 @@ flags=(-std=c11 -g -O1 -Wall -Wextra -Wno-misleading-indentation -fsanitize=unde
 "$build_dir/codec"
 echo 'PASS: telemetry C encoder'
 node tests/test_uplink_decoders.js
+node tests/test_downlink_configurator.js
