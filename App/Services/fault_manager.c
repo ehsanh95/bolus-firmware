@@ -2,10 +2,13 @@
 #include "bolus_led.h"
 
 #include <stddef.h>
+#include <string.h>
 
 static bolus_fault_mask_t active_faults = 0U;
 static bolus_fault_mask_t fault_history = 0U;
 static uint8_t last_fault_code = BOLUS_FAULT_CODE_NONE;
+
+volatile fault_manager_diag_t fault_manager_diag = {0};
 
 static bool FaultManager_IsValidId(bolus_fault_id_t fault)
 {
@@ -96,7 +99,27 @@ static bool FaultManager_DomainHasActiveFault(bolus_fault_domain_detail_t domain
 
 static void FaultManager_UpdateLedForDomain(bolus_fault_domain_detail_t domain)
 {
-    bool active = FaultManager_DomainHasActiveFault(domain);
+    /*
+     * Shared physical LEDs: clearing sensor fault must not hide battery fault.
+     * Each update checks ALL domains mapped to the given LED.
+     */
+    bool active;
+    switch (domain)
+    {
+        case BOLUS_FAULT_DOMAIN_SENSOR:
+        case BOLUS_FAULT_DOMAIN_BATTERY:
+            active = FaultManager_DomainHasActiveFault(BOLUS_FAULT_DOMAIN_SENSOR) ||
+                     FaultManager_DomainHasActiveFault(BOLUS_FAULT_DOMAIN_BATTERY);
+            break;
+        case BOLUS_FAULT_DOMAIN_RF:
+            active = FaultManager_DomainHasActiveFault(BOLUS_FAULT_DOMAIN_RF);
+            break;
+        default:
+            active = FaultManager_DomainHasActiveFault(BOLUS_FAULT_DOMAIN_POWER) ||
+                     FaultManager_DomainHasActiveFault(BOLUS_FAULT_DOMAIN_CONFIG) ||
+                     FaultManager_DomainHasActiveFault(BOLUS_FAULT_DOMAIN_SYSTEM);
+            break;
+    }
 
     switch (domain)
     {
@@ -144,6 +167,9 @@ void FaultManager_Init(void)
     active_faults = 0U;
     fault_history = 0U;
     last_fault_code = BOLUS_FAULT_CODE_NONE;
+    memset((void *)&fault_manager_diag, 0, sizeof(fault_manager_diag));
+    fault_manager_diag.last_raised_id = BOLUS_FAULT_CODE_NONE;
+    fault_manager_diag.last_cleared_id = BOLUS_FAULT_CODE_NONE;
 
     BolusLed_Init();
     BolusLed_AllOff();
@@ -158,8 +184,19 @@ void FaultManager_Raise(bolus_fault_id_t fault)
         return;
     }
 
+    fault_manager_diag.raise_call_count++;
+    if ((active_faults & BOLUS_FAULT_BIT(fault)) == 0U)
+        fault_manager_diag.newly_active_count++;
+    else
+        fault_manager_diag.repeat_raise_count++;
+    if (fault_manager_diag.raises_by_id[fault] != UINT16_MAX)
+        fault_manager_diag.raises_by_id[fault]++;
+
     active_faults |= BOLUS_FAULT_BIT(fault);
     fault_history |= BOLUS_FAULT_BIT(fault);
+    fault_manager_diag.active_mask = active_faults;
+    fault_manager_diag.history_mask = fault_history;
+    fault_manager_diag.last_raised_id = (uint8_t)fault;
     last_fault_code = (uint8_t)fault;
 
     descriptor = FaultManager_Describe(fault);
@@ -182,7 +219,13 @@ bool FaultManager_ClearFault(bolus_fault_id_t fault)
         return false;
     }
 
+    if ((active_faults & BOLUS_FAULT_BIT(fault)) != 0U)
+    {
+        fault_manager_diag.clear_count++;
+        fault_manager_diag.last_cleared_id = (uint8_t)fault;
+    }
     active_faults &= ~BOLUS_FAULT_BIT(fault);
+    fault_manager_diag.active_mask = active_faults;
     FaultManager_UpdateLedForDomain(descriptor.domain);
 
     return true;
@@ -260,6 +303,7 @@ bool FaultManager_GetDescriptor(
 void FaultManager_ClearHistory(void)
 {
     fault_history = 0U;
+    fault_manager_diag.history_mask = 0U;
 }
 
 /* -------------------------------------------------------------------------
@@ -322,6 +366,8 @@ void FaultManager_Clear(bolus_fault_domain_t fault)
 
 void FaultManager_ClearAll(void)
 {
+    /* Explicit lab reset; ClearFault() still respects latched fault policy. */
     active_faults = 0U;
+    fault_manager_diag.active_mask = 0U;
     BolusLed_AllOff();
 }
