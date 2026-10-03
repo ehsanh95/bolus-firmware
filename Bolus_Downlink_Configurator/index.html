@@ -298,6 +298,66 @@ footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.
   .top-controls .spacer{display:none}
   .send-pill{align-self:flex-start}
 }
+
+/* Guided bench workflow and academic reporting; all self-contained. */
+.tool-nav{display:flex;flex-wrap:wrap;gap:9px;margin:18px 0}
+.tool-nav a{padding:10px 14px;border:1px solid #c7d8e6;border-radius:10px;background:white;color:#173d5d;text-decoration:none;font-weight:750;font-size:13px}
+.tool-nav a:hover{background:#edf5fb}
+.bench-guide{border:1px solid #bdd5e8;background:#f1f8ff;border-radius:13px;padding:15px 20px;margin:0 0 19px;line-height:1.9;color:#264761}
+.bench-guide h3{margin:0 0 7px}.bench-guide ol{margin:3px 0;padding-right:21px}
+.field-guide{padding:5px 14px 9px;margin:0;border-top:1px dashed #e4edf4;background:#f8fbfd;font-size:12px;line-height:1.85}
+.field-guide summary{cursor:pointer;color:#355d7a;font-size:11px;font-weight:700}
+.field-guide p{margin:8px 0 1px;color:#455968}
+.report-root{font-family:Tahoma,"Segoe UI",sans-serif;text-align:right;line-height:1.95}
+.report-root .panel-body{padding:24px 28px}
+.report-root h3{font-size:18px;color:#17324d;border-right:4px solid #2563a6;padding-right:12px;margin:27px 0 12px}
+.report-root h4{font-size:14px;margin:15px 0 6px;color:#294e6d}
+.report-root p{margin:8px 0;font-size:13px}
+.report-root ul,.report-root ol{padding-right:24px;padding-left:0;font-size:13px}
+.report-root .report-action{display:flex;gap:9px;flex-wrap:wrap;margin:0 0 20px}
+.report-root .report-kicker{font-size:11px;color:#637c8f;letter-spacing:.02em}
+.report-root .report-heading{font-size:29px;line-height:1.45;color:#163650;margin:0 0 6px}
+.report-root .report-meta{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+.report-root .report-meta span{border:1px solid #d9e5ed;background:#f6f9fc;padding:7px 11px;font-size:11px;border-radius:8px}
+.report-root .academic-table{border-collapse:collapse;width:100%;font-size:11.5px;line-height:1.7;margin:10px 0 20px}
+.report-root .academic-table th,.report-root .academic-table td{border:1px solid #dbe4eb;padding:9px;text-align:right;vertical-align:top}
+.report-root .academic-table th{background:#eaf2f9;color:#1f4360}
+.report-root .academic-table tbody tr:nth-child(even){background:#f8fbfd}
+.report-root .tag-pass{color:#16603b;font-weight:800}.report-root .tag-open{color:#87520a;font-weight:800}.report-root .tag-scope{color:#2e648e;font-weight:800}
+.report-root .report-lead{border-right:4px solid #83b1d4;background:#f1f7fc;padding:12px 15px;color:#294b63;font-size:13px}
+.report-root .report-two-col{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.report-root figure{padding:13px;margin:14px 0;border:1px solid #dbe5ee;border-radius:13px;background:#fbfdff}
+.report-root figure svg{display:block;width:100%;max-width:100%;height:auto}
+.report-root figcaption{font-size:11px;color:#50697d;margin-top:8px;line-height:1.75}
+.report-root .report-alert{background:#fff9e8;border-right:4px solid #be8e32;padding:12px 15px;font-size:12px}
+.report-root .report-evidence{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.report-root .evidence-card{border:1px dashed #9fb9cd;border-radius:12px;padding:12px;background:#f5f9fc;min-width:0}
+.report-root .evidence-card img{max-width:100%;max-height:230px;object-fit:contain;display:none;margin-top:8px}
+.report-root .evidence-card label{font-size:11px;line-height:1.7}
+.report-root .evidence-card input{width:100%;max-width:100%;font-size:11px}
+.report-root .technical-code{font-family:Consolas,Menlo,monospace;white-space:pre-wrap;direction:ltr;text-align:left;background:#eff4f8;padding:12px;font-size:11px;border:1px solid #d7e3ee;border-radius:9px;line-height:1.65}
+.report-root .report-footnote{color:#687f92;font-size:10.5px}
+@media(max-width:920px){.report-root .report-two-col,.report-root .report-evidence{grid-template-columns:1fr}}
+@page{size:A4;margin:14mm}
+@media print{
+ html,body{background:white!important;color:#17212b!important}
+ body main{padding:0;max-width:none}
+ body main>.hero,body main>.notice,body main>.tool-nav,body main>footer{display:none!important}
+ .workspace>.panel:not(.report-root){display:none!important}
+ .workspace{display:block!important}
+ .report-root{box-shadow:none!important;border:none!important;border-radius:0!important}
+ .report-root .panel-head{padding:0 0 15px!important}
+ .report-root .panel-body{padding:0!important}
+ .report-root .report-action,.report-root .evidence-card input,.report-root .evidence-card label{display:none!important}
+ .report-root .academic-table,.report-root figure,.report-root .report-alert{break-inside:avoid}
+ .report-root tr{break-inside:avoid}
+ .report-root .evidence-card:not(.has-image){display:none!important}
+ .report-root h3{break-after:avoid}
+ .report-root,.report-root *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ .report-root .report-two-col{grid-template-columns:1fr 1fr}
+ .report-root .report-evidence{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
 </style>
 </head>
 <body>
@@ -315,11 +375,16 @@ footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.
 
   <div class="notice">
     <div class="notice-icon">!</div>
-    <div><strong>Staging boundary.</strong> This tool generates and decodes application payloads offline. Telemetry V3 is active; V2/V2.1/V2.2 remain legacy. Uplink reception has been observed in bench testing, but FPort 3 delivery, FPort 4 responses, RX1/RX2, and hardware apply still require individual validation. A generated payload or accepted ACK does not prove live apply.</div>
+    <div><strong>Staging boundary.</strong> This tool generates and decodes application payloads offline. Telemetry V3 is active; V2/V2.1/V2.2 remain legacy. October 2026 bench logs confirm FPort 3 reception, FPort 4 ACK/NACK and live application of selected sensor/telemetry settings. Separate RX1/RX2 characterization, BMA physical calibration, and actual RF SF change under ADR remain open. A generated payload or accepted ACK alone never proves live hardware or RF apply.</div>
   </div>
 
+  <nav class="tool-nav" aria-label="Toolkit navigation">
+    <a href="#builder">1 — Downlink Builder</a>
+    <a href="#decoder">2 — Uplink Decoder</a>
+    <a href="#academicReport">3 — گزارش پژوهشی و شواهد آزمایش</a>
+  </nav>
   <div class="workspace">
-    <section class="panel">
+    <section class="panel" id="builder">
       <div class="panel-head">
         <div class="panel-title">
           <div class="step">1</div>
@@ -340,42 +405,72 @@ footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.
           <div class="send-pill">Unconfirmed downlink · FPort 3 · Fresh transaction ID for new commands</div>
         </div>
 
+        <aside class="bench-guide" dir="rtl" lang="fa">
+          <h3>راهنمای سریع آزمایش سخت‌افزاری</h3>
+          <ol><li>فقط فیلدهایی را علامت بزنید که باید تغییر کنند؛ ترتیب چند فرمان، به‌ویژه Acquisition Level و تنظیمات سفارشی سنسورها، مهم است.</li>
+          <li>برای هر فرمان جدید Transaction ID تازه تعیین کنید. برای تشخیص تکرار، همان شناسهٔ آخرین فرمان پذیرفته‌شده را عمداً دوباره بفرستید.</li>
+          <li>Base64 را به‌صورت <b>Unconfirmed / FPort 3</b> در ChirpStack صف کنید؛ در Class A دریافت دانلینک در پنجرهٔ دریافت پس از آپلینک انجام می‌شود.</li>
+          <li>ACK را در FPort 4 بررسی کنید؛ <code>result=0</code> فقط پذیرش درخواست است. صفرشدن <code>pending_apply_mask</code> و <code>failed_apply_mask</code> و رفتار سنسور/گیت‌وی، تأیید مستقل می‌خواهند.</li>
+          <li>هنگام اندازه‌گیری فاصلهٔ ارسال و پنجره‌های RX، از Pause/Breakpoint استفاده نکنید. داده‌های محرمانهٔ ABP را در گزارش یا اسکرین‌شات قرار ندهید.</li></ol>
+          <div class="report-footnote">در هر گروه، «راهنما و روش تأیید» را باز کنید تا محدوده، وابستگی و روش آزمایش همان فیلد را ببینید.</div>
+        </aside>
         <div class="config-grid">
           <section class="subcard">
             <div class="subcard-head"><h3>Motion / Event</h3><span class="subcard-tag">BMA456</span></div>
             <div class="row"><input class="enable" data-target="bmaEvent" type="checkbox"><label>BMA Event sensitivity<small>Independent from Step Counter sensitivity.</small></label><select id="bmaEvent" disabled><option value="0">RAW (0)</option><option value="1">VERY_LOW (1)</option><option value="2">LOW (2)</option><option value="3">LEVEL_1 (3)</option><option value="4" selected>LEVEL_2 (4)</option><option value="5">LEVEL_3 (5)</option><option value="6">LEVEL_4 (6)</option><option value="7">OFF (7)</option></select></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای bmaEvent و روش تأیید</summary><p>حساسیت وقفهٔ Any-Motion در BMA456 است و با حساسیت شمارش قدم ارتباطی ندارد. مقادیر ۱ و ۲ آستانه‌های محافظه‌کارانه‌تری دارند؛ سطوح بالاتر به حرکت‌های کوچک‌تری واکنش نشان می‌دهند. مقدار RAW تنها برای کالیبراسیون با آستانه‌های خام تنظیم‌شده مناسب است و OFF تشخیص رویداد حرکتی را خاموش می‌کند. تأیید: پروفایل و آستانهٔ readback در bma_event_service_diag و سپس ایجاد حرکت کنترل‌شده.</p></details>
             <div class="row"><input class="enable" data-target="bmaStep" type="checkbox"><label>BMA Step sensitivity<small>Current RuntimeConfig accepts Default, Level 1, and Level 7.</small></label><select id="bmaStep" disabled><option value="0">DEFAULT (0)</option><option value="1">LEVEL_1 (1)</option><option value="7">LEVEL_7 (7)</option></select></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای bmaStep و روش تأیید</summary><p>سنجش قدم مستقل از وقفهٔ حرکت است. فقط DEFAULT (پارامترهای پیش‌فرض تراشه)، LEVEL_1 (کم‌حساسیت/مقاوم‌تر) و LEVEL_7 (پرحساسیت/ریسک مثبت کاذب بیشتر) در اعتبارسنجی فعلی پذیرفته می‌شوند. سطوح ۲ تا ۶ در نگاشت درایور تعریف شده‌اند اما فعلاً تأیید محصولی ندارند. پس از اعمال، bma456_diag_step_params_valid و param5/param13 را بررسی و قدم‌های واقعی را با مرجع مقایسه کنید.</p></details>
             <div class="row"><input class="enable" data-target="guard" type="checkbox"><label>Episode retrigger guard<small>0..60000 ms and must be shorter than quiet timeout.</small></label><input id="guard" type="number" min="0" max="60000" value="2000" disabled></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای guard و روش تأیید</summary><p>در یک Episode، حرکت‌های بسیار نزدیک به هم را به رویدادهای مستقل تبدیل نمی‌کند. مقدار بر حسب میلی‌ثانیه است (۰ تا ۶۰۰۰۰) و باید از quiet timeout کوتاه‌تر باشد. عملکرد را با دو پالس نزدیک و سپس دو پالس دورتر از guard آزمایش کنید؛ suppressed_trigger_count و شمارندهٔ اپیزود معیارند.</p></details>
             <div class="row"><input class="enable" data-target="quiet" type="checkbox"><label>Episode quiet timeout<small>1..3600 s.</small></label><input id="quiet" type="number" min="1" max="3600" value="120" disabled></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای quiet و روش تأیید</summary><p>وقتی بعد از آخرین حرکت/رویداد، این تعداد ثانیه سکوت برقرار بماند، اپیزود می‌تواند بسته شود. بازهٔ معتبر ۱ تا ۳۶۰۰ ثانیه است و با محدودیت max-duration نیز سازگار می‌ماند. برای اثبات، زمان بسته‌شدن، closed_episode_count و digest را بررسی کنید؛ بازپیکربندی در زمان رویداد ممکن است تا پایان اپیزود به تعویق بیفتد.</p></details>
             <div class="row"><input class="enable" data-target="eventEnable" type="checkbox"><label>Event processing<small>Enable or disable event processing.</small></label><select id="eventEnable" disabled><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای eventEnable و روش تأیید</summary><p>مسیر پردازش و ثبت رویدادهای سنسوری را فعال/غیرفعال می‌کند؛ با قطع کامل برق سنسور و شمارش قدم یکی نیست. پس از ACK باید آماده‌بودن سرویس رویداد، pending_apply_mask و اثر حرکت کنترل‌شده بررسی شود؛ تغییر هنگام اپیزود فعال ممکن است عقب بیفتد.</p></details>
           </section>
 
           <section class="subcard">
             <div class="subcard-head"><h3>Temperature / MPU</h3><span class="subcard-tag">Sensors</span></div>
             <div class="row"><input class="enable" data-target="acqLevel" type="checkbox"><label>Acquisition Level<small>0=min power, 3=normal dual-sentinel, 5=high-observation.</small></label><select id="acqLevel" disabled><option value="0">0 — Boundary only</option><option value="1">1 — Very low</option><option value="2">2 — Low</option><option value="3" selected>3 — Normal</option><option value="4">4 — High</option><option value="5">5 — Field calibration</option></select></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای acqLevel و روش تأیید</summary><p>پروفایل تجمیعی سطح ۰ تا ۵ است و به‌صورت هم‌زمان سیاست BMA، TMP، MPU و پردازش رویداد را تغییر می‌دهد. سطح ۰ حداقل توان و بدون sentinel پس‌زمینه، سطح ۳ حالت عادی دو sentinel و سطوح ۴ و ۵ مشاهدهٔ پرتراکم‌ترند. اجرای این دستور می‌تواند تنظیمات سفارشی قبلی حسگر را بازنویسی کند؛ ترتیب فرمان‌ها در یک پیام مهم است. تأیید: FPort2 acquisition_level و صفرشدن همهٔ بیت‌های معلق.</p></details>
             <div class="row"><input class="enable" data-target="tmpAlert" type="checkbox"><label>TMP117 thermal sentinel<small>Independent HIGH/LOW Alert Mode.</small></label><select id="tmpAlert" disabled><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای tmpAlert و روش تأیید</summary><p>sentinel حرارتی TMP117 را در حالت HIGH/LOW مستقل فعال یا غیرفعال می‌کند؛ روشن‌شدن آن strategy را به HYBRID و خاموش‌شدن به PERIODIC تغییر می‌دهد. باید IRQ، آستانه‌های دمایی و برگشت از هشدار نیز با محرک کنترل‌شده آزموده شوند.</p></details>
             <div class="row"><input class="enable" data-target="tmpHigh" type="checkbox"><label>TMP117 high limit<small>Signed centi-°C; default 4100 = 41.00°C.</small></label><input id="tmpHigh" type="number" min="-5500" max="15000" value="4100" disabled></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای tmpHigh و روش تأیید</summary><p>آستانهٔ بالای دما در واحد صدم درجهٔ سلسیوس است؛ ۴۱۰۰ یعنی ۴۱٫۰۰°C. بازهٔ کلی محصول ۵۵- تا ۱۵۰+ درجه است؛ مقدار بالا باید بزرگ‌تر از حد پایین فعلی باشد. عددهای چندبایتی little-endian ارسال می‌شوند. نتیجه را در RAM و در رفتار هشدار واقعی TMP117 بررسی کنید.</p></details>
             <div class="row"><input class="enable" data-target="tmpLow" type="checkbox"><label>TMP117 low limit<small>Signed centi-°C; default 3500 = 35.00°C.</small></label><input id="tmpLow" type="number" min="-5500" max="15000" value="3500" disabled></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای tmpLow و روش تأیید</summary><p>آستانهٔ پایین دما در واحد صدم درجهٔ سلسیوس است؛ ۳۵۰۰ یعنی ۳۵°C. باید کوچک‌تر از حد بالای فعلی و در محدودهٔ معتبر باشد. دو آستانه را برای جلوگیری از ردِ موقت در ترتیب سازگار بفرستید؛ تأیید RAM با IRQ و آزمایش گرم/سرد متفاوت است.</p></details>
             <div class="row"><input class="enable" data-target="tmpCycle" type="checkbox"><label>TMP117 conversion cycle<small>0..7; product presets use 7=16s, 6=8s, 5=4s, 4=1s.</small></label><select id="tmpCycle" disabled><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4 — 1 s</option><option value="5">5 — 4 s</option><option value="6" selected>6 — 8 s</option><option value="7">7 — 16 s</option></select></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای tmpCycle و روش تأیید</summary><p>چرخهٔ تبدیل TMP117 را تعیین می‌کند. در پروفایل‌های پروژه ۷≈۱۶ ثانیه، ۶≈۸ ثانیه، ۵≈۴ ثانیه و ۴≈۱ ثانیه‌اند. کاهش چرخه به بیداری/مصرف بیشتری منجر می‌شود؛ زمان واقعی نمونه‌گیری و مصرف باید روی سخت‌افزار سنجیده شود.</p></details>
             <div class="row"><input class="enable" data-target="tmpPeriod" type="checkbox"><label>TMP117 background period<small>Advanced PERIODIC mode only; 1..86400 s.</small></label><input id="tmpPeriod" type="number" min="1" max="86400" value="600" disabled></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای tmpPeriod و روش تأیید</summary><p>فاصلهٔ نمونه‌گیری پس‌زمینه فقط در strategy=PERIODIC معنا دارد؛ بازه ۱ تا ۸۶۴۰۰ ثانیه است. این دستور در فریمور فعلی بدون بیت بازپیکربندی زنده ثبت می‌شود؛ بنابراین تنها پذیرش RAM اثبات می‌شود و کارکرد زمان‌بندی آن را باید جداگانه بررسی کرد.</p></details>
             <div class="row"><input class="enable" data-target="mpuBurst" type="checkbox"><label>MPU burst duration<small>100..500 ms.</small></label><input id="mpuBurst" type="number" min="100" max="500" value="250" disabled></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای mpuBurst و روش تأیید</summary><p>مدت نمونه‌برداری انفجاری MPU6050 در بازهٔ ۱۰۰ تا ۵۰۰ میلی‌ثانیه است. افزایش آن اطلاعات حرکتی بیشتر و هزینهٔ انرژی بالاتر دارد. اجرای زنده با بیت MPU_SENSOR انجام می‌شود؛ تعداد نمونه‌ها، عدم تداخل رادیویی و بازگشت به وضعیت کم‌مصرف را اندازه بگیرید.</p></details>
             <div class="row"><input class="enable" data-target="mpuTrigger" type="checkbox"><label>MPU event trigger<small>Enable or disable event-triggered MPU bursts.</small></label><select id="mpuTrigger" disabled><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای mpuTrigger و روش تأیید</summary><p>فعال‌بودن Burstهای MPU6050 در پاسخ به رویداد سنسوری را تعیین می‌کند؛ خاموش‌کردن آن الزاماً نمونه‌برداری زمان‌بندی‌شده را حذف نمی‌کند. تأیید: pending mask، شمارندهٔ MPU burst و رویداد مصنوعی/فیزیکی.</p></details>
           </section>
 
           <section class="subcard">
             <div class="subcard-head"><h3>Telemetry</h3><span class="subcard-tag">Uplink</span></div>
             <div class="row"><input class="enable" data-target="uplinkPeriod" type="checkbox"><label>Uplink / telemetry period<small>1..86400 s; repository default 900 s. Enter the new target period, not the current board value.</small></label><input id="uplinkPeriod" type="number" min="1" max="86400" value="900" disabled></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای uplinkPeriod و روش تأیید</summary><p>فاصلهٔ هدف پنجرهٔ تله‌متری برحسب ثانیه (۱ تا ۸۶۴۰۰) است؛ پیش‌فرض مخزن ۹۰۰ ثانیه و مقادیر بنچ ممکن است ۶۰ یا ۱۲۰ باشند. با ACK تنها RAM تأیید می‌شود؛ پس از صفرشدن pending، چند FPort2 متوالی را بدون Pause دیباگر زمان‌سنجی کنید. اولین فاصلهٔ پس از تغییر ممکن است گذرا باشد.</p></details>
           </section>
 
           <section class="subcard">
-            <div class="subcard-head"><h3>RF / Radio Policy</h3><span class="subcard-tag warn">Live apply untested</span></div>
+            <div class="subcard-head"><h3>RF / Radio Policy</h3><span class="subcard-tag warn">ADR / PHY requires validation</span></div>
             <div class="row"><input class="enable" data-target="txPower" type="checkbox"><label>TX power<small>Even values 2..16 dBm. Hardware apply must be verified separately.</small></label><input id="txPower" type="number" min="2" max="16" step="2" value="10" disabled></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای txPower و روش تأیید</summary><p>توان هدف رادیو؛ در RuntimeConfig فقط مقادیر زوج ۲ تا ۱۶ dBm پذیرفته می‌شوند و به index منطقهٔ EU868 نگاشت می‌شوند. مقدار درخواستی اثبات اندازه‌گیری توان خروجی آنتن نیست؛ با محدودیت‌های منطقه، MAC و تجهیزات RF مطابقت دهید.</p></details>
             <div class="row"><input class="enable" data-target="sf" type="checkbox"><label>Spreading Factor<small>SF7..SF12 RuntimeConfig field.</small></label><select id="sf" disabled><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای sf و روش تأیید</summary><p>SF7 تا SF12 به نرخ‌های دادهٔ EU868 نگاشت می‌شوند (SF12=DR0، SF7=DR5 در ۱۲۵ kHz). وقتی ADR فعال است، MAC/شبکه می‌توانند نرخ واقعی را کنترل کنند. پذیرش ACK، صفرشدن pending و حتی s_requested_datarate=0 اثبات ارسال روی SF12 نیست؛ DR گزارش‌شده در گیت‌وی را جداگانه بخوانید.</p></details>
             <div class="row"><input class="enable" data-target="bw" type="checkbox"><label>Bandwidth index<small>0=125 kHz; 1=250 kHz requires SF7. Select both fields together when changing bandwidth.</small></label><select id="bw" disabled><option value="0">0 — 125 kHz</option><option value="1">1 — 250 kHz (SF7 / DR6 only)</option></select></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای bw و روش تأیید</summary><p>۰ یعنی ۱۲۵ kHz و ۱ یعنی ۲۵۰ kHz که در اعتبارسنجی فعلی فقط با SF7 مجاز است. قبل از تغییر، سازگاری gateway/network-server و محدودیت‌های EU868 را بررسی کنید؛ تغییر هم‌زمان SF/BW تنها با پروفایل سازگار ارسال شود.</p></details>
             <div class="row"><input class="enable" data-target="cr" type="checkbox"><label>Coding rate<small>Only 1 (4/5) is accepted by current runtime validation.</small></label><select id="cr" disabled><option value="1">1 — LoRaWAN regional profile</option></select></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای cr و روش تأیید</summary><p>کدینگ LoRaWAN در این نسخه فقط مقدار ۱، معادل پروفایل ۴/۵ پذیرفته می‌شود. این گزینه را برای آزمون‌های دیگر تغییر ندهید؛ تأیید RF واقعی به لاگ PHY شبکه وابسته است.</p></details>
             <div class="row"><input class="enable" data-target="txTimeout" type="checkbox"><label>TX timeout<small>500..10000 ms.</small></label><input id="txTimeout" type="number" min="500" max="10000" value="3000" disabled></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای txTimeout و روش تأیید</summary><p>مهلت داخلی ارسال در محدودهٔ ۵۰۰ تا ۱۰۰۰۰ میلی‌ثانیه است؛ به‌معنی طول پنجرهٔ دریافت LoRaWAN یا دورهٔ ارسال نیست. تست پایداری باید watchdog، MAC busy و شکست‌های واقعی را هم پوشش دهد.</p></details>
             <div class="row"><input class="enable" data-target="retryDelay" type="checkbox"><label>Retry delay<small>0..60000 ms.</small></label><input id="retryDelay" type="number" min="0" max="60000" value="2000" disabled></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای retryDelay و روش تأیید</summary><p>فاصلهٔ انتظار برای تلاش مجدد سرویس ارسال، ۰ تا ۶۰۰۰۰ میلی‌ثانیه. این عدد قوانین duty cycle اروپا را دور نمی‌زند؛ آمار retry و defer را در کنار پاسخ MAC بخوانید.</p></details>
             <div class="row"><input class="enable" data-target="maxAttempts" type="checkbox"><label>Max TX attempts<small>1..5.</small></label><input id="maxAttempts" type="number" min="1" max="5" value="3" disabled></div>
+            <details class="field-guide" dir="rtl" lang="fa"><summary>راهنمای maxAttempts و روش تأیید</summary><p>حداکثر تلاش ارسال در سرویس صف: ۱ تا ۵. افزایش آن مصرف و ازدحام را بالا می‌برد. تست فشار برای queue-full، MAC-busy و failure/drop مستقل از ACK دانلینک ضروری است.</p></details>
           </section>
         </div>
 
@@ -404,7 +499,7 @@ footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="decoder">
       <div class="panel-head">
         <div class="panel-title">
           <div class="step">2</div>
@@ -459,6 +554,161 @@ footer{margin-top:20px;padding:0 4px;color:#748393;font-size:11px;line-height:1.
             </tbody>
           </table>
         </details>
+
+        <details class="details" dir="rtl" lang="fa">
+          <summary>راهنمای تفسیر FPort 2 و FPort 4 و جلوگیری از نتیجه‌گیری اشتباه</summary>
+          <div style="padding:14px 18px;line-height:1.95;font-size:12px">
+            <p><b>FPort 2 — تله‌متری:</b> در V3 نوع Summary، سطح نمونه‌برداری (acquisition_level)، وضعیت CUSTOM، نسخهٔ طرح تنظیمات، پرچم‌های اعتبار داده، دما، باتری و شمارنده‌های رویداد ارسال می‌شوند. بسته‌های continuation فقط بخشی از digestهای یک پنجره‌اند. <code>runtime_config_version=12</code> شمارهٔ Schema است نه شمارندهٔ تغییرات.</p>
+            <p><b>FPort 4 — پاسخ فرمان:</b> هشت بایت شامل <code>D2 01 [TXID] [RESULT] [APPLY_MASK_LE16] [SCHEMA_LE16]</code> است. نتیجهٔ <code>00</code> یعنی پذیرفته ولی احتمالاً هنوز در حال اعمال؛ <code>02</code> یعنی شناسهٔ آخرین تراکنش پذیرفته‌شده دوباره به کار رفته است. مقدار apply mask نشان می‌دهد کدام سرویس‌ها باید بازپیکربندی شوند؛ رسیدن آن به صفر در پاسخ نشان‌دهندهٔ اتمام نیست، بلکه باید در دیباگر <code>pending_apply_mask</code> را بررسی کرد.</p>
+            <p><b>کدهای خطا:</b> <code>0x83</code> طول، <code>0x84</code> دستور ناشناخته، <code>0x85</code> مقدار، <code>0x86</code> پیکربندی نامعتبر. پیام چنددستوری باید به‌صورت اتمیک بررسی شود؛ وجود یک فرمان نامعتبر، کل commit آن پیام را رد می‌کند.</p>
+            <p><b>RF و ADR:</b> Spreading Factor در RuntimeConfig یا <code>s_requested_datarate</code> مقدار درخواستی برنامه‌اند؛ برای نتیجهٔ PHY باید SF/DR خود گیت‌وی و وضعیت ADR شبکه را هم ثبت کنید. نبود باتری واقعی هنگام تغذیه از پروگرامر می‌تواند مقدار باتری صفر را توضیح دهد اما به‌تنهایی صحت ADC را اثبات نمی‌کند.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="panel report-root" id="academicReport" lang="fa" dir="rtl" aria-label="گزارش عملکرد و اعتبارسنجی دانلینک">
+      <div class="panel-head">
+        <div class="panel-title" style="align-items:center">
+          <div class="step">3</div>
+          <div><h2>گزارش عملکرد دانلینک و شواهد آزمایش</h2>
+          <p>نسخهٔ فارسی، علمی و قابل چاپ؛ همراه با نمودار، جدول، دیاگرام و پیوست شواهد واقعی</p></div>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="report-action">
+          <button type="button" id="printAcademicReport">چاپ گزارش / ذخیره به PDF</button>
+          <button type="button" class="secondary" id="exportAcademicHtml">خروجی HTML مستقل (قابل بازکردن در Word)</button>
+        </div>
+        <div class="report-kicker">گزارش آزمایشگاهی — ۳ اکتبر ۲۰۲۶ — Bolus Firmware — شاخهٔ test/functional-downlink</div>
+        <h1 class="report-heading">طراحی، پیاده‌سازی و ارزیابی تجربی سامانهٔ مدیریت دانلینک LoRaWAN در گرهٔ Bolus</h1>
+        <div class="report-meta">
+          <span>پروژه: Bolus / STM32L476</span><span>بستر شبکه: EU868 · ABP · Class A · ChirpStack</span>
+          <span>نسخهٔ پروتکل: ۱</span><span>نسخهٔ Schema تنظیمات: ۱۲</span>
+          <span>پژوهشگر: [تکمیل شود]</span><span>استاد راهنما: [تکمیل شود]</span>
+        </div>
+        <p class="report-lead"><b>چکیده.</b> در این آزمایش‌ها، دریافت دانلینک در FPort 3، تولید ACK/NACK هشت‌بایتی در FPort 4، رد فرمان‌های نامعتبر، تشخیص تراکنش تکراری و اعمال هم‌زمان تنظیمات سنسور و تله‌متری در یک برد واقعی بررسی شدند. شواهد ChirpStack و متغیرهای تشخیصی STM32CubeIDE، تغییر پروفایل نمونه‌برداری، آستانهٔ دما و دورهٔ ارسال را نشان می‌دهند. پذیرش و ثبت درخواست SF12 نیز مشاهده شد؛ بااین‌حال SF واقعی گزارش‌شده توسط گیت‌وی SF7 باقی ماند و با توجه به فعال‌بودن ADR، این مورد هنوز تأیید سخت‌افزاری نشده است.</p>
+
+        <h3>۱. هدف، سامانهٔ تحت آزمایش و محدودهٔ نتیجه</h3>
+        <p>هدف، سنجش سه سطح مجزای درستی است: <b>۱) دریافت و اعتبارسنجی پروتکل</b>، <b>۲) اعمال زندهٔ تنظیمات در سرویس‌های فریمور</b>، و <b>۳) اثر قابل‌مشاهده روی حسگر یا PHY رادیو</b>. برابر دانستن ACK با صحت سطح سوم، نتیجه‌گیری نادرست خواهد بود. آزمایش‌ها بر STM32L476، BMA456، TMP117، MPU6050 و RFM95W با ChirpStack انجام شدند. برد در این جلسه از تغذیهٔ ۳٫۳ ولت پروگرامر استفاده می‌کرد؛ بنابراین اندازه‌گیری باتری و مصرف واقعی خارج از محدودهٔ این گزارش‌اند.</p>
+        <figure>
+          <svg viewBox="0 0 910 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="معماری جریان دانلینک و تأیید">
+            <defs><marker id="flow-arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0L7 3L0 6" fill="#547d9f"/></marker></defs>
+            <rect x="5" y="22" rx="11" width="152" height="89" fill="#e9f2fa" stroke="#a5c2d9"/><text x="81" y="56" font-size="15" text-anchor="middle" fill="#1b4461" font-weight="700">ChirpStack</text><text x="81" y="80" font-size="12" text-anchor="middle" fill="#46677f">FPort 3 / Queue</text>
+            <rect x="192" y="22" rx="11" width="152" height="89" fill="#e9f2fa" stroke="#a5c2d9"/><text x="268" y="56" font-size="15" text-anchor="middle" fill="#1b4461" font-weight="700">EU868 Class A</text><text x="268" y="80" font-size="12" text-anchor="middle" fill="#46677f">RX1 / RX2</text>
+            <rect x="379" y="22" rx="11" width="152" height="89" fill="#e9f2fa" stroke="#a5c2d9"/><text x="455" y="56" font-size="15" text-anchor="middle" fill="#1b4461" font-weight="700">Protocol</text><text x="455" y="80" font-size="12" text-anchor="middle" fill="#46677f">TLV / Atomic</text>
+            <rect x="566" y="22" rx="11" width="152" height="89" fill="#e9f4ee" stroke="#8dbba0"/><text x="642" y="56" font-size="15" text-anchor="middle" fill="#255f44" font-weight="700">Runtime Apply</text><text x="642" y="80" font-size="12" text-anchor="middle" fill="#42725a">Pending / Failed</text>
+            <rect x="753" y="22" rx="11" width="152" height="89" fill="#fff3e8" stroke="#d7b193"/><text x="829" y="56" font-size="15" text-anchor="middle" fill="#815037" font-weight="700">Physical Check</text><text x="829" y="80" font-size="12" text-anchor="middle" fill="#916950">Sensor / RF</text>
+            <path d="M157 66H190 M344 66H377 M531 66H564 M718 66H751" stroke="#547d9f" stroke-width="2" fill="none" marker-end="url(#flow-arrow)"/>
+            <path d="M455 112V144H81V113" stroke="#497f9d" stroke-width="1.8" stroke-dasharray="5 4" fill="none"/><text x="264" y="139" font-size="11" text-anchor="middle" fill="#345c77">FPort 4: ACK / NACK</text>
+          </svg>
+          <figcaption>شکل ۱ — دیاگرام مفهومی مسیر مدیریت فرمان. تصویر شماتیک است، نه اسکرین‌شات واقعی آزمایش؛ پذیرش، اعمال سرویس و تأیید فیزیکی مراحل مستقل‌اند.</figcaption>
+        </figure>
+
+        <h3>۲. روش آزمایش و معیارهای پذیرش</h3>
+        <ol>
+          <li>ایجاد پیام TLV پروتکل نسخهٔ ۱ و ارسال آن به‌صورت Unconfirmed روی FPort 3؛ تحویل در Class A به آپلینک وابسته است.</li>
+          <li>ثبت FPort 4 شامل شناسه، کد نتیجه و ماسک سرویس‌های نیازمند اعمال. ثبت نتیجهٔ رد یا تکرار بدون تغییر RAM.</li>
+          <li>بررسی مقدار هدف در <code>sensor_service_config</code>، صفرشدن <code>pending_apply_mask</code> و <code>failed_apply_mask</code> و شمارنده‌های اعمال.</li>
+          <li>بررسی مستقل FPort 2، فاصلهٔ واقعی آپلینک، وضعیت سنسور و مشخصات PHY گزارش‌شده توسط گیت‌وی. توقف دیباگر می‌تواند زمان‌بندی و پنجره‌های دریافت را مخدوش کند.</li>
+        </ol>
+        <div class="report-alert">مبنای این گزارش، لاگ‌ها و تصاویر ارسال‌شده در جلسات آزمون است؛ تست‌های ARM/Release، کل RX1/RX2، پایداری درازمدت و آزمایش RF با ADR غیرفعال در همین جلسه مستند نشده‌اند. شمارنده‌های دیباگر پس از Reset تجمیع بین همهٔ جلسات نیستند.</div>
+
+        <h3>۳. نتایج ثبت‌شدهٔ آزمون‌های پروتکل و اعمال تنظیمات</h3>
+        <table class="academic-table">
+          <thead><tr><th>شناسه</th><th>سناریو و معیار پذیرش</th><th>شاهد ثبت‌شده</th><th>وضعیت</th></tr></thead>
+          <tbody>
+            <tr><td>D01</td><td>تغییر دورهٔ آپلینک به ۶۰ ثانیه</td><td>ACK پذیرفته؛ Apply Mask = 0x0010؛ ارسال دوره‌ای نزدیک به ۶۰ ثانیه مشاهده شد.</td><td class="tag-pass">تأیید</td></tr>
+            <tr><td>D02</td><td>ارسال مجدد شناسهٔ آخرین فرمان پذیرفته‌شده</td><td>تراکنش ۸؛ پاسخ DUPLICATE_TRANSACTION با Result = 2 و ماسک صفر</td><td class="tag-pass">تأیید</td></tr>
+            <tr><td>D03</td><td>رد مقدار بولی نامعتبر</td><td>تراکنش ۹؛ ERROR_VALUE (133 / 0x85)، ماسک صفر</td><td class="tag-pass">تأیید</td></tr>
+            <tr><td>D04</td><td>رد اتمیک بستهٔ ترکیبی با دستور ناشناخته</td><td>تراکنش ۱۰؛ ERROR_COMMAND (132 / 0x84)، دورهٔ قبلی ۶۰ ثانیه باقی ماند.</td><td class="tag-pass">تأیید</td></tr>
+            <tr><td>D05</td><td>رد آستانهٔ غیرمجاز ۳۰۰ درجه</td><td>تراکنش ۱۱؛ ERROR_CONFIG (134 / 0x86)، بدون Apply</td><td class="tag-pass">تأیید</td></tr>
+            <tr><td>D06</td><td>اعمال پروفایل نمونه‌برداری سطح ۴</td><td>تراکنش ۱۲؛ ماسک 0x004D؛ FPort2 سطح ۴؛ pending/failed هر دو صفر</td><td class="tag-pass">تأیید</td></tr>
+            <tr><td>D07</td><td>بازگشت از سطح ۴ به سطح ۳</td><td>تراکنش ۱۳؛ ماسک 0x004D؛ FPort2 سطح ۳؛ apply_complete_count=9 و pending/failed=0</td><td class="tag-pass">تأیید</td></tr>
+            <tr><td>D10</td><td>اعمال هم‌زمان سه فرمان معتبر</td><td>تراکنش ۱۵؛ سطح ۲، حد بالای دما ۴۰۰۰، دورهٔ ۱۲۰ ثانیه؛ ماسک 0x005D؛ هر دو ماسک پس از اعمال صفر</td><td class="tag-pass">تأیید</td></tr>
+            <tr><td>RF/BMA</td><td>بستهٔ چهارفرمانی بعدی</td><td>تراکنش ۱۷؛ ACK با ماسک 0x0033، بدون apply failure؛ DR0 در فریمور، SF7 در گیت‌وی. صحت فیزیکی حساسیت BMA هنوز آزموده نشده است.</td><td class="tag-open">بخشی تأیید / باز</td></tr>
+          </tbody>
+        </table>
+        <p class="report-footnote">برچسب «تأیید» محدود به معیار همان ردیف است، نه تأیید کل سامانه یا تمام دستورهای پشتیبانی‌شده. بستهٔ ناقص عمدی D09 و بازگردانی نهایی مقدار کارخانه در این جلسه اجرا نشده‌اند.</p>
+
+        <h3>۴. نمودارها و تحلیل مشاهدات</h3>
+        <div class="report-two-col">
+          <figure>
+            <svg viewBox="0 0 470 218" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="تنظیمات ۶۰ و ۱۲۰ ثانیه در آزمایش">
+              <text x="235" y="24" font-size="14" text-anchor="middle" fill="#183f5d" font-weight="700">Configured / observed cadence</text>
+              <line x1="103" y1="175" x2="413" y2="175" stroke="#7593a8"/>
+              <line x1="103" y1="175" x2="103" y2="50" stroke="#7593a8"/>
+              <rect x="153" y="113" width="78" height="62" rx="5" fill="#5b94be"/><text x="192" y="104" text-anchor="middle" font-size="15" fill="#244969" font-weight="700">60 s</text><text x="192" y="197" text-anchor="middle" font-size="12" fill="#456b85">D01</text>
+              <rect x="285" y="51" width="78" height="124" rx="5" fill="#2c6e93"/><text x="324" y="42" text-anchor="middle" font-size="15" fill="#244969" font-weight="700">120 s</text><text x="324" y="197" text-anchor="middle" font-size="12" fill="#456b85">D10</text>
+              <text x="95" y="178" text-anchor="end" font-size="10" fill="#5b778b">0</text><text x="95" y="115" text-anchor="end" font-size="10" fill="#5b778b">60</text><text x="95" y="54" text-anchor="end" font-size="10" fill="#5b778b">120</text>
+            </svg>
+            <figcaption>شکل ۲ — دو دورهٔ هدفِ تأییدشده در آزمون؛ فاصله‌های ۶۰ و ۱۲۰ ثانیه از مشاهدهٔ دوره‌ای/گزارش کاربر پشتیبانی می‌شوند. این نمودار هیستوگرام فاصله‌های خام یا ادعای دقت میلی‌ثانیه‌ای نیست.</figcaption>
+          </figure>
+          <figure>
+            <svg viewBox="0 0 470 218" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="مقایسه SF درخواستی با SF گزارش شده">
+              <text x="235" y="24" font-size="14" text-anchor="middle" fill="#183f5d" font-weight="700">SF requested vs gateway-reported</text>
+              <line x1="75" y1="175" x2="423" y2="175" stroke="#7593a8"/>
+              <rect x="129" y="40" width="90" height="135" rx="5" fill="#cb9254"/><text x="174" y="32" text-anchor="middle" font-size="16" fill="#875826" font-weight="700">SF12</text><text x="174" y="195" text-anchor="middle" font-size="12" fill="#4d6478">Requested</text>
+              <rect x="281" y="96" width="90" height="79" rx="5" fill="#659cba"/><text x="326" y="88" text-anchor="middle" font-size="16" fill="#2a617c" font-weight="700">SF7</text><text x="326" y="195" text-anchor="middle" font-size="12" fill="#4d6478">Gateway</text>
+            </svg>
+            <figcaption>شکل ۳ — تراکنش ۱۷: مقدار درخواستی ۱۲ و s_requested_datarate=0 (DR0) در دیباگر؛ آپلینک ثبت‌شده در ChirpStack همچنان SF7/DR5 و ADR فعال بود. علت دقیق هنوز اثبات نشده است.</figcaption>
+          </figure>
+        </div>
+        <figure>
+          <svg viewBox="0 0 820 165" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="مقایسه شمارنده‌های تأخیر اعمال">
+            <text x="415" y="22" font-size="14" text-anchor="middle" fill="#183f5d" font-weight="700">Deferred apply scheduler passes — D07 snapshot</text>
+            <text x="182" y="65" font-size="13" text-anchor="end" fill="#3a5e76">Radio critical</text><rect x="196" y="48" rx="4" width="505" height="24" fill="#508cb2"/><text x="709" y="65" font-size="13" fill="#244c69" font-weight="700">4057</text>
+            <text x="182" y="111" font-size="13" text-anchor="end" fill="#3a5e76">Episode active</text><rect x="196" y="94" rx="4" width="209" height="24" fill="#7fa6a0"/><text x="413" y="111" font-size="13" fill="#38635a" font-weight="700">1680</text>
+          </svg>
+          <figcaption>شکل ۴ — شمارنده‌های تجمعی تأخیر در یک Snapshot از D07. واحد، «دفعات عبور از حلقه و تعویق» است؛ این اعداد ثانیه یا تعداد رویدادهای مستقل نیستند و از آن‌ها نباید زمان تأخیر استخراج کرد. در همان آزمون، pending و failed نهایتاً صفر شدند.</figcaption>
+        </figure>
+
+        <h3>۵. مطالعهٔ موردی: فرمان چنددستوری معتبر</h3>
+        <p>در تراکنش ۱۵، سه دستور مستقل برای تنظیم <b>Acquisition Level=2</b>، <b>TMP117 high limit=40°C</b> و <b>Telemetry Period=120s</b> در یک بسته ارسال شدند. ACK روی FPort 4 با Result=0 و ماسک 0x005D دریافت شد. سپس FPort 2 در تاریخ 2026-10-03 ساعت 18:19:51 UTC، سطح ۲ و CUSTOM=true را گزارش کرد؛ تصویر دیباگر نیز high_limit=4000، period=120 و pending/failed=0 را نشان داد.</p>
+        <div class="technical-code">FPort4 — Transaction 15
+Base64: 0gEPAF0ADAA=
+Result: ACCEPTED_PENDING_APPLY (0x00)
+Apply mask: 0x005D
+Schema: 12
+
+FPort2 — Example observation
+fCnt: 50 / 2026-10-03T18:19:51Z
+acquisition_level: 2
+custom_profile: true
+runtime_config_version: 12</div>
+        <p>این آزمایش، اتمیک‌بودن پذیرش چند فرمان معتبر و تکمیل اعمال سرویس‌ها را در سناریوی ثبت‌شده تأیید می‌کند. تفاوت زمانی احتمالی نخستین آپلینک پس از تغییر دوره، به‌ویژه با توقف دیباگر، نباید به‌تنهایی خطای زمان‌بندی شمرده شود.</p>
+
+        <h3>۶. مطالعهٔ موردی: پذیرش تغییر SF بدون تأیید PHY</h3>
+        <p>در پاسخ تراکنش ۱۷، چهار فرمان با ماسک 0x0033 پذیرفته شدند. Snapshot دیباگر پس از اعمال، <code>spreading_factor=12</code>، <code>s_requested_datarate=0</code>، <code>pending_apply_mask=0</code>، <code>failed_apply_mask=0</code> و <code>last_mac_status=OK</code> را نشان داد. آپلینک FPort2 با fCnt=107 در 19:34:11 UTC همچنان با SF7 و <code>adr=true</code> ثبت شده است.</p>
+        <p>بنابراین «درخواست RF در RuntimeConfig و سرویس MAC» مستند است، ولی «ارسال واقعی با SF12» مستند نیست. ADR یک عامل قابل بررسی است، نه علت اثبات‌شده. آزمایش مستقل با کنترل ADR، بررسی MIB نزدیک لحظهٔ TX و مقایسهٔ لاگ گیت‌وی برای رفع این مغایرت ضروری است.</p>
+
+        <h3>۷. محدودیت‌ها، آزمون‌های باقیمانده و گیت تکمیل</h3>
+        <table class="academic-table">
+          <thead><tr><th>اولویت</th><th>آزمون باقی‌مانده</th><th>شواهد لازم برای تکمیل</th></tr></thead>
+          <tbody>
+            <tr><td>بالا</td><td>RF PHY در SFهای ۷ و ۱۲ با مدیریت صریح ADR</td><td>تنظیم ADR قابل‌کنترل، MIB نزدیک لحظهٔ TX، SF/DR واقعی در گیت‌وی و حفظ قابلیت دریافت دانلینک</td></tr>
+            <tr><td>بالا</td><td>حساسیت واقعی BMA456: Any-Motion و Step</td><td>Readback پارامترهای feature engine، حرکت/قدم با محرک مرجع، نرخ تشخیص و مثبت کاذب</td></tr>
+            <tr><td>بالا</td><td>دانلینک هنگام اپیزود فعال و بازپیکربندی تعویقی</td><td>ثبت active، افزایش defer، بدون قطع زودرس اپیزود، pending=0 پس از پایان، sensor ready</td></tr>
+            <tr><td>متوسط</td><td>RX1/RX2 جداگانه؛ پاسخ در ازدحام و duty cycle</td><td>لاگ Tx gateway، last_downlink_slot، عدم تداخل ACK قبلی و بازیابی پس از busy/drop</td></tr>
+            <tr><td>متوسط</td><td>Wrong FPort، بستهٔ ناقص و فرمان‌های باقی‌مانده</td><td>کد خطای درست، عدم commit تنظیمات و عدم خرابی صف/ACK</td></tr>
+            <tr><td>متوسط</td><td>STOP2 و چرخه‌های طولانی خواب/بیداری و Reset/ABP</td><td>شمارنده‌های بیداری، زمان ارسال بدون Pause، ثبات فریم‌کانتر و رویهٔ نشست آزمون امن</td></tr>
+            <tr><td>جداگانه</td><td>باتری، مصرف و ADC با منبع تغذیهٔ نهایی</td><td>اتصال باتری واقعی، ولتاژ ADC معتبر و اندازه‌گیری جریان در شرایط عملیاتی</td></tr>
+          </tbody>
+        </table>
+        <p class="report-alert"><b>محدودیت ثبت نتیجه:</b> در شرایط فعلی، نتیجهٔ صحیح عبارت است از «اعتبارسنجی موفق سناریوهای اصلیِ دریافت/رد/اعمال تنظیمات دانلینک»؛ نه تأیید کامل تمامی ۲۱ فرمان، همهٔ پنجره‌های دریافت و تمام لایه‌های PHY یا صلاحیت تولید انبوه.</p>
+
+        <h3>۸. شواهد تصویری واقعی برای نسخهٔ نهایی استاد</h3>
+        <p>برای اضافه‌کردن عکس‌های واقعی آزمایش، فایل تصویر مربوط به هر بخش را همین‌جا انتخاب کنید و سپس «چاپ گزارش / PDF» یا خروجی HTML بگیرید. عکس‌ها فقط در مرورگر خودتان خوانده می‌شوند و از طریق Toolkit به سرور ارسال نمی‌شوند. پیش از ضمیمه، کلیدهای ABP، اطلاعات محرمانه و شناسه‌های غیرضروری را حذف کنید.</p>
+        <div class="report-evidence">
+          <figure class="evidence-card"><b>شاهد A — ACK تراکنش ۱۵</b><label for="evidenceInputA">اسکرین‌شات ChirpStack با Result و Apply Mask</label><input id="evidenceInputA" type="file" accept="image/png,image/jpeg,image/webp" data-evidence="A"><img id="evidenceImgA" alt="تصویر واقعی ACK تراکنش ۱۵ پس از انتخاب محلی"><figcaption>شکل ۵ — پاسخ FPort4 تراکنش ۱۵؛ تصویر واقعی پس از انتخاب نمایش داده می‌شود.</figcaption></figure>
+          <figure class="evidence-card"><b>شاهد B — اعمال نهایی</b><label for="evidenceInputB">اسکرین‌شات STM32CubeIDE، ماسک‌های pending/failed و مقادیر RAM</label><input id="evidenceInputB" type="file" accept="image/png,image/jpeg,image/webp" data-evidence="B"><img id="evidenceImgB" alt="تصویر واقعی اعمال تنظیمات در دیباگر پس از انتخاب محلی"><figcaption>شکل ۶ — Snapshot واقعی اعمال سرویس‌ها؛ پس از انتخاب نمایش داده می‌شود.</figcaption></figure>
+          <figure class="evidence-card"><b>شاهد C — بررسی RF</b><label for="evidenceInputC">اسکرین‌شات گیت‌وی SF7/ADR در کنار درخواست SF12</label><input id="evidenceInputC" type="file" accept="image/png,image/jpeg,image/webp" data-evidence="C"><img id="evidenceImgC" alt="تصویر واقعی گزارش SF و ADR در ChirpStack پس از انتخاب محلی"><figcaption>شکل ۷ — شواهد مغایرت RF؛ پس از انتخاب نمایش داده می‌شود.</figcaption></figure>
+        </div>
+        <p class="report-footnote">بدون انتخاب تصویر، این قسمت صرفاً محل ضمیمه است و خروجی چاپی، عکس ساختگی اضافه نمی‌کند. خروجی HTML مستقل را می‌توانید با Microsoft Word باز کنید و در صورت مناسب‌بودن قالب، Save As → DOCX انجام دهید؛ فایل تولیدی این دکمه خودش DOCX نیست.</p>
+
+        <h3>۹. جمع‌بندی علمی</h3>
+        <p>آزمایش‌های واقعی، پذیرش معتبر بسته‌های FPort3، پاسخ مستقل FPort4، جلوگیری از تراکنش تکراری، رد اتمیک ورودی نامعتبر و اعمال هم‌زمان تنظیمات BMA/TMP و دورهٔ تله‌متری را در سناریوهای ثبت‌شده نشان می‌دهند. تفاوت میان ACK و تکمیل بازپیکربندی از طریق pending/failed mask در سطح نرم‌افزار ردیابی شده است. بااین‌حال تغییر درخواستی SF12 هنوز در خروجی واقعی RF مشاهده نشده و آزمون‌های فیزیکی حساسیت حرکت، هر دو پنجرهٔ دریافت و پایداری طولانی هنوز باز هستند؛ لذا ارزیابی حاضر یک اعتبارسنجی مرحله‌ای است، نه تأیید نهایی تولید.</p>
+        <div class="report-footnote"><b>منابع داخلی و بازتولیدپذیری:</b> App/Services/downlink_management_service.c · App/Services/lorawan_uplink_service.c · App/Services/telemetry_window_service.c · App/Config/bolus_runtime_config.c · tests/downlink_bench_vectors.json · docs/functional_validation_2026-10-03.md. زمان‌های گزارش UTC هستند. اعداد و نمودارها فقط از شواهد ثبت‌شدهٔ این جلسه استفاده می‌کنند.</div>
       </div>
     </section>
   </div>
@@ -651,7 +901,7 @@ document.getElementById('decodeUplinkBtn').addEventListener('click',()=>{try{con
 document.getElementById('clearUplink').addEventListener('click',()=>{document.getElementById('uplinkInput').value='';document.getElementById('uplinkJson').value='';setUplinkStatus('Telemetry V2/V2.1/V2.2/V3 supported; V3 packets are variable-length. ACK/NACK must be exactly 8 bytes.','info');});
 
 const telemetryTestVector=[0x41,0x10,0x00,0x0B,0x8F,0xF8,0x0C,0x8D,0x09,0x8C,0x09,0x94,0x09,0xFA,0xFF,1,3,8,3,2,0,3,59,95,46,77,0,63,0,0,0,0,0xCF,0,0x3A,0xFF,0xBC,0x03];
-const ackTestVector=[0xD2,0x01,0x2A,0x00,0x20,0x00,0x0B,0x00];
+const ackTestVector=[0xD2,0x01,0x2A,0x00,0x20,0x00,0x0C,0x00];
 function loadVector(port,bytes){document.getElementById('uplinkPort').value=String(port);document.getElementById('uplinkEncoding').value='hex';document.getElementById('uplinkInput').value=bytesToSpacedHex(bytes);document.getElementById('uplinkJson').value='';setUplinkStatus('Test vector loaded. Press Decode Uplink.','info');}
 document.getElementById('loadTelemetryExample').addEventListener('click',()=>loadVector(2,telemetryTestVector));
 document.getElementById('loadAckExample').addEventListener('click',()=>loadVector(4,ackTestVector));
@@ -669,6 +919,30 @@ try{
       document.getElementById('txid').value=(saved+1)&0xFF;
   }
 }catch(_e){/* Keep the default transaction ID. */}
+
+// Academic bench report: print only the report; optionally export a standalone HTML
+// file that Word can open. No external dependencies or network upload.
+document.getElementById('printAcademicReport').addEventListener('click',()=>window.print());
+document.getElementById('exportAcademicHtml').addEventListener('click',()=>{
+  const clone=document.getElementById('academicReport').cloneNode(true);
+  clone.querySelectorAll('.report-action,input[type=file]').forEach(node=>node.remove());
+  const css=document.querySelector('style').textContent;
+  const documentHtml='<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Bolus Downlink — Academic Bench Report</title><style>'+css+'</style></head><body><main>'+clone.outerHTML+'</main></body></html>';
+  const url=URL.createObjectURL(new Blob([documentHtml],{type:'text/html;charset=utf-8'}));
+  const anchor=document.createElement('a');
+  anchor.href=url;anchor.download='bolus_downlink_bench_report_2026-10-03.html';
+  document.body.appendChild(anchor);anchor.click();anchor.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),3000);
+});
+document.querySelectorAll('input[data-evidence]').forEach(input=>input.addEventListener('change',()=>{
+  const file=input.files&&input.files[0];if(!file)return;
+  if(!['image/png','image/jpeg','image/webp'].includes(file.type)){alert('فقط تصویر PNG، JPEG یا WebP پذیرفته می‌شود.');input.value='';return;}
+  if(file.size>7*1024*1024){alert('اندازهٔ هر تصویر حداکثر ۷ مگابایت باشد.');input.value='';return;}
+  const reader=new FileReader();
+  reader.onload=()=>{const img=document.getElementById('evidenceImg'+input.dataset.evidence);img.src=reader.result;img.style.display='block';img.closest('.evidence-card').classList.add('has-image');};
+  reader.readAsDataURL(file);
+}));
+
 </script>
 </body>
 </html>
