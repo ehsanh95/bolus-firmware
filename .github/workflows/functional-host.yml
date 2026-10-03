@@ -1,0 +1,22 @@
+name: Functional host checks
+
+on:
+  push:
+    branches:
+      - test/functional-downlink
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: C host regressions and offline configurator checks
+        run: bash tests/run_host_tests.sh
+      - name: C syntax coverage
+        run: python3 tools/check_c_syntax.py
+      - name: Whitespace checks
+        run: git diff --check HEAD^ HEAD
