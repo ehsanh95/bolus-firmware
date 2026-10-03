@@ -91,6 +91,11 @@ typedef struct
     LoRaMacEventInfoStatus_t last_join_confirm_status;
 
     /* RX1/RX2 observations plus staged [UNTESTED] command routing. */
+    uint32_t rx_indication_count;
+    uint32_t rx_error_count;
+    uint32_t rx_without_app_data_count;
+    uint32_t command_blocked_response_busy_count;
+    LoRaMacEventInfoStatus_t last_rx_status;
     uint32_t downlink_count;
     uint32_t downlink_command_count;
     uint32_t downlink_wrong_port_count;

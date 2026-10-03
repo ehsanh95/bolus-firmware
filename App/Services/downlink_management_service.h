@@ -126,6 +126,13 @@ typedef struct
     uint32_t ram_config_commit_count;
     uint32_t apply_complete_count;
     uint32_t apply_failure_count;
+    uint8_t last_payload_size;
+    uint8_t last_parse_offset;
+    uint8_t last_command_index; /* zero-based; 0xFF before any TLV */
+    downlink_apply_mask_t last_attempted_apply_mask;
+    downlink_apply_mask_t failed_apply_mask;
+    uint32_t apply_deferred_radio_count;
+    uint32_t apply_deferred_episode_count;
 } downlink_management_diag_t;
 
 extern downlink_management_diag_t downlink_management_diag;

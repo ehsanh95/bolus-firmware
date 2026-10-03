@@ -886,11 +886,13 @@ static void ApplyPendingRuntimeConfig(void)
     downlink_apply_mask_t mask;
     bool ok;
 
-    if (radio_tx_service_ready && RadioTxService_IsRadioCritical())
-        return;
-
     mask = DownlinkManagementService_GetPendingApplyMask();
     if (mask == DOWNLINK_APPLY_NONE) return;
+    if (radio_tx_service_ready && RadioTxService_IsRadioCritical())
+    {
+        downlink_management_diag.apply_deferred_radio_count++;
+        return;
+    }
 
     if (EventEpisodeService_IsActive(&event_episode_service) &&
         ((mask & (DOWNLINK_APPLY_BMA_SENSOR |
@@ -899,6 +901,7 @@ static void ApplyPendingRuntimeConfig(void)
                   DOWNLINK_APPLY_EVENT_EPISODE |
                   DOWNLINK_APPLY_MPU_SENSOR)) != 0U))
     {
+        downlink_management_diag.apply_deferred_episode_count++;
         return;
     }
 

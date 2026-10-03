@@ -291,6 +291,10 @@ downlink_result_t DownlinkManagementService_HandleFrame(
     }
 
     downlink_management_diag.rx_frame_count++;
+    downlink_management_diag.last_payload_size = size;
+    downlink_management_diag.last_parse_offset = 0U;
+    downlink_management_diag.last_command_index = 0xFFU;
+    downlink_management_diag.last_command_id = 0U;
 
     if (payload == NULL) goto reject;
     if (size >= 3U) transaction_id = payload[2];
@@ -339,6 +343,8 @@ downlink_result_t DownlinkManagementService_HandleFrame(
             goto reject;
         }
 
+        downlink_management_diag.last_parse_offset = offset;
+        downlink_management_diag.last_command_index = command_index;
         command_id = payload[offset++];
         length = payload[offset++];
         downlink_management_diag.last_command_id = command_id;
@@ -397,7 +403,7 @@ downlink_result_t DownlinkManagementService_HandleFrame(
 reject:
     downlink_management_diag.rejected_count++;
     downlink_management_diag.last_transaction_id = transaction_id;
-    downlink_management_diag.last_transaction_valid = (size >= 3U);
+    downlink_management_diag.last_transaction_valid = ((payload != NULL) && (size >= 3U));
     downlink_management_diag.last_command_count = command_count;
     downlink_management_diag.last_apply_mask = DOWNLINK_APPLY_NONE;
     downlink_management_diag.last_result = result;
@@ -420,14 +426,17 @@ void DownlinkManagementService_MarkApplyResult(
     attempted_mask &= downlink_management_diag.pending_apply_mask;
     if (attempted_mask == DOWNLINK_APPLY_NONE) return;
 
+    downlink_management_diag.last_attempted_apply_mask = attempted_mask;
     if (success)
     {
         downlink_management_diag.pending_apply_mask &=
             (downlink_apply_mask_t)(~attempted_mask);
+        downlink_management_diag.failed_apply_mask &= (downlink_apply_mask_t)~attempted_mask;
         downlink_management_diag.apply_complete_count++;
     }
     else
     {
+        downlink_management_diag.failed_apply_mask |= attempted_mask;
         downlink_management_diag.apply_failure_count++;
     }
 }

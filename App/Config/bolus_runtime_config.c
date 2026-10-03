@@ -35,7 +35,9 @@ bool BolusRuntimeConfig_Validate(const bolus_runtime_config_t *c){
  if(!c||c->version!=BOLUS_RUNTIME_CONFIG_VERSION||c->operating_mode>BOLUS_MODE_CUSTOM||c->acquisition_level>BOLUS_ACQUISITION_LEVEL_5)return false;
  if(!c->temperature.sample_period_s||c->temperature.sample_period_s>86400U||c->temperature.strategy>BOLUS_TEMP_STRATEGY_HYBRID||c->temperature.conversion_cycle>7U)return false;
  if(c->temperature.averaging_samples!=1U&&c->temperature.averaging_samples!=8U&&c->temperature.averaging_samples!=32U&&c->temperature.averaging_samples!=64U)return false;
- if(c->temperature.high_limit_centi_c<=c->temperature.low_limit_centi_c)return false;
+ /* Keep alert limits within the supported application temperature range. */
+ if(c->temperature.low_limit_centi_c < -5500 || c->temperature.high_limit_centi_c > 15000 ||
+    c->temperature.high_limit_centi_c<=c->temperature.low_limit_centi_c)return false;
  if(c->bma.odr>BOLUS_BMA_ODR_50_HZ||(c->bma.range_g!=2U&&c->bma.range_g!=4U&&c->bma.range_g!=8U&&c->bma.range_g!=16U)||!IsPowerOfTwo(c->bma.averaging_samples)||c->bma.averaging_samples>64U||!IsValidatedBmaStepProfile(c->bma.step_sensitivity))return false;
  if(c->mpu.burst_duration_ms<100U||c->mpu.burst_duration_ms>500U||!IsSupportedMpuSampleRate(c->mpu.sample_rate_hz))return false;
  if((c->mpu.accel_range_g!=2U&&c->mpu.accel_range_g!=4U&&c->mpu.accel_range_g!=8U&&c->mpu.accel_range_g!=16U)||(c->mpu.gyro_range_dps!=250U&&c->mpu.gyro_range_dps!=500U&&c->mpu.gyro_range_dps!=1000U&&c->mpu.gyro_range_dps!=2000U))return false;

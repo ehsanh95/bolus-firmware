@@ -13,3 +13,7 @@ Any telemetry-field change should be accompanied by:
 1. encoder tests,
 2. decoder tests,
 3. compatibility checks for frozen protocol versions.
+
+## Functional host suite
+
+Run `bash tests/run_host_tests.sh` with GCC and Node.js. Uses UBSan; the HAL tick is a host stub, not hardware simulation. See `docs/functional_validation_2026-10-03.md` for tested scope, bench vectors, debugger expressions and remaining gates.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Idempotently configure the CubeIDE Debug build for the staged LoRaWAN stack.
+"""Idempotently configure the CubeIDE Debug and Release builds for the staged LoRaWAN stack.
 
 This script deliberately adds only the LoRaWAN middleware source roots required by
 Bolus. It also removes stale/broad ThirdParty source entries which can make
@@ -11,7 +11,7 @@ Why a script instead of committing generated .cproject edits directly:
 - the project had a known-good Phase-4/5 build configuration we want to preserve.
 - this patch is deterministic and easy to revert with `git checkout -- .cproject`.
 
-Run from the repository root, then Refresh/Clean/Build Debug in STM32CubeIDE.
+Run from the repository root, then Refresh/Clean/Build Debug/Release in STM32CubeIDE.
 """
 from pathlib import Path
 import re
@@ -94,46 +94,38 @@ def _sanitize_debug_source_entries(text: str) -> tuple[str, int, bool]:
 
 def main() -> None:
     if not CPROJECT.exists():
-        fail('run this script from the bolus-firmware repository root')
-
+        fail('run from the repository root')
     text = CPROJECT.read_text(encoding='utf-8')
-
     if EXPECTED_BUILD_SYSTEM not in text:
-        fail('known CubeIDE buildSystemId not found; refusing to rewrite .cproject')
-
-    changed = False
-
-    # Include paths are header search paths only. The Reference/App path is used
-    # for se-identity.h; it is intentionally NOT a source root.
-    missing_includes = [p for p in INCLUDE_LINES if p not in text]
-    if missing_includes:
-        if INCLUDE_ANCHOR not in text:
-            fail('Debug RFM95W include-path anchor not found')
-        insert = ''.join(
-            '\n\t\t\t\t\t\t\t\t\t<listOptionValue builtIn="false" '
-            f'value="&quot;{path}&quot;"/>'
-            for path in missing_includes
-        )
-        text = text.replace(INCLUDE_ANCHOR, INCLUDE_ANCHOR + insert, 1)
-        changed = True
-
-    text, removed, sources_changed = _sanitize_debug_source_entries(text)
-    changed = changed or sources_changed
-
-    if changed:
+        fail('unknown build system')
+    blocks = list(re.finditer(r'<cconfiguration\b.*?</cconfiguration>', text, re.DOTALL))
+    if len(blocks) != 2:
+        fail('expected Debug and Release configurations')
+    # Use Debug's complete application include set for both configurations.
+    include_re = r'(<option\b[^>]*valueType="includePath"[^>]*>)(.*?)(</option>)'
+    debug_includes = re.search(include_re, blocks[0].group(), re.DOTALL)
+    if debug_includes is None:
+        fail('Debug include option missing')
+    values = re.findall(r'<listOptionValue[^>]*/>', debug_includes.group(2))
+    for path in INCLUDE_LINES:
+        entry = f'<listOptionValue builtIn="false" value="&quot;{path}&quot;"/>'
+        if entry not in values:
+            values.append(entry)
+    include_body = ''.join('\n\t\t\t\t\t\t\t\t\t' + v for v in values) + '\n\t\t\t\t\t\t\t\t'
+    for block in reversed(blocks):
+        old = block.group()
+        new, count = re.subn(include_re, lambda m: m[1] + include_body + m[3], old, flags=re.DOTALL)
+        if count != 1:
+            fail('expected one C include-path option per configuration')
+        new, _, _ = _sanitize_debug_source_entries(new)
+        if not re.search(r'kind="sourcePath" name="App"', new):
+            new = new.replace('<sourceEntries>', '<sourceEntries>\n\t\t\t\t\t\t<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="App"/>')
+        text = text[:block.start()] + new + text[block.end():]
+    if text != CPROJECT.read_text(encoding='utf-8'):
         CPROJECT.write_text(text, encoding='utf-8', newline='')
-        print('[LoRaWAN CubeIDE patch] .cproject updated.')
+        print('[LoRaWAN CubeIDE patch] Debug and Release updated.')
     else:
-        print('[LoRaWAN CubeIDE patch] already configured; no content changes required.')
-
-    if removed:
-        print(f'[LoRaWAN CubeIDE patch] removed {removed} stale/broad ThirdParty source entrie(s).')
-
-    print('[LoRaWAN CubeIDE patch] Debug source allow-list:')
-    for path in SOURCE_LINES:
-        print(f'  - {path}')
-    print('[LoRaWAN CubeIDE patch] Reference projects and package-level ST Utilities are NOT source roots.')
-    print('[LoRaWAN CubeIDE patch] Next: Refresh Project -> Clean Project -> Build Debug.')
+        print('[LoRaWAN CubeIDE patch] already configured.')
 
 
 if __name__ == '__main__':

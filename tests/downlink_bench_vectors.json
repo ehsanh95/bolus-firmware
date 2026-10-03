@@ -1,0 +1,58 @@
+[
+  {
+    "name": "period_60",
+    "fport": 3,
+    "hex": "D101010107043C000000",
+    "base64": "0QEBAQcEPAAAAA==",
+    "expected_result": 0
+  },
+  {
+    "name": "duplicate",
+    "fport": 3,
+    "hex": "D101010107043C000000",
+    "base64": "0QEBAQcEPAAAAA==",
+    "expected_result": 2
+  },
+  {
+    "name": "invalid_bool",
+    "fport": 3,
+    "hex": "D1010201080102",
+    "base64": "0QECAQgBAg==",
+    "expected_result": 133
+  },
+  {
+    "name": "atomic_rollback",
+    "fport": 3,
+    "hex": "D101030207045A000000FF0100",
+    "base64": "0QEDAgcEWgAAAP8BAA==",
+    "expected_result": 132
+  },
+  {
+    "name": "invalid_temperature",
+    "fport": 3,
+    "hex": "D101040113023075",
+    "base64": "0QEEARMCMHU=",
+    "expected_result": 134
+  },
+  {
+    "name": "level_4",
+    "fport": 3,
+    "hex": "D1010501110104",
+    "base64": "0QEFAREBBA==",
+    "expected_result": 0
+  },
+  {
+    "name": "restore_level_3",
+    "fport": 3,
+    "hex": "D1010601110103",
+    "base64": "0QEGAREBAw==",
+    "expected_result": 0
+  },
+  {
+    "name": "restore_period_900",
+    "fport": 3,
+    "hex": "D1010701070484030000",
+    "base64": "0QEHAQcEhAMAAA==",
+    "expected_result": 0
+  }
+]

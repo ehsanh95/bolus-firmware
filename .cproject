@@ -56,6 +56,11 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/App/Drivers/Sensors/MPU6050}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/App/Drivers/Sensors/BMA456}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/App/Drivers/RF/RFM95W}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Mac}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Mac/Region}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Crypto}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Utilities}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ThirdParty/I-CUBE-LRWAN/Reference/NUCLEO-L476RG/LoRaWAN/LoRaWAN_End_Node/LoRaWAN/App}&quot;"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.1490071970" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c"/>
 							</tool>
@@ -85,6 +90,9 @@
 						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="App"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Mac"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Crypto"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Utilities"/>
 					</sourceEntries>
 				</configuration>
 			</storageModule>
@@ -137,6 +145,15 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/App/BSP}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/App/Services}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/App/Drivers/Battery}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/App/Drivers/Sensors/TMP117}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/App/Drivers/Sensors/MPU6050}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/App/Drivers/Sensors/BMA456}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/App/Drivers/RF/RFM95W}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Mac}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Mac/Region}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Crypto}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Utilities}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ThirdParty/I-CUBE-LRWAN/Reference/NUCLEO-L476RG/LoRaWAN/LoRaWAN_End_Node/LoRaWAN/App}&quot;"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.1297840007" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c"/>
 							</tool>
@@ -163,8 +180,12 @@
 						</toolChain>
 					</folderInfo>
 					<sourceEntries>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="App"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Mac"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Crypto"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="ThirdParty/I-CUBE-LRWAN/Middlewares/Third_Party/LoRaWAN/Utilities"/>
 					</sourceEntries>
 				</configuration>
 			</storageModule>

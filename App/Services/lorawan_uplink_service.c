@@ -85,6 +85,7 @@ static LoRaMacCallback_t s_mac_callbacks;
 
 lorawan_uplink_diag_t lorawan_uplink_service_diag = {0};
 
+static bool ApplyRadioMib(void);
 static bool ConfigureMacPolicy(void);
 static bool ConfigureAbpSession(void);
 static bool ActivateAbpSession(void);
@@ -411,9 +412,16 @@ static void MacMcpsIndication(McpsIndication_t *indication, LoRaMacRxStatus_t *r
         return;
     }
 
-    if ((indication->Status != LORAMAC_EVENT_INFO_STATUS_OK) ||
-        !indication->RxData)
+    lorawan_uplink_service_diag.rx_indication_count++;
+    lorawan_uplink_service_diag.last_rx_status = indication->Status;
+    if (indication->Status != LORAMAC_EVENT_INFO_STATUS_OK)
     {
+        lorawan_uplink_service_diag.rx_error_count++;
+        return;
+    }
+    if (!indication->RxData)
+    {
+        lorawan_uplink_service_diag.rx_without_app_data_count++;
         return;
     }
 
@@ -437,6 +445,7 @@ static void MacMcpsIndication(McpsIndication_t *indication, LoRaMacRxStatus_t *r
 
     if (s_control_response_pending)
     {
+        lorawan_uplink_service_diag.command_blocked_response_busy_count++;
         lorawan_uplink_service_diag.downlink_response_drop_count++;
         return;
     }
