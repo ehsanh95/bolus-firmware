@@ -99,6 +99,12 @@ static bool FaultManager_DomainHasActiveFault(bolus_fault_domain_detail_t domain
 
 static void FaultManager_UpdateLedForDomain(bolus_fault_domain_detail_t domain)
 {
+#if (BOLUS_BENCH_LED_DIAGNOSTICS != 0)
+    /* The main-loop bench renderer exclusively owns GPIO while enabled.
+     * Raise/Clear can run during LoRa callbacks; never toggle inside RX1/RX2. */
+    (void)domain;
+    return;
+#else
     /*
      * Shared physical LEDs: clearing sensor fault must not hide battery fault.
      * Each update checks ALL domains mapped to the given LED.
@@ -160,6 +166,7 @@ static void FaultManager_UpdateLedForDomain(bolus_fault_domain_detail_t domain)
             }
             break;
     }
+#endif
 }
 
 void FaultManager_Init(void)
