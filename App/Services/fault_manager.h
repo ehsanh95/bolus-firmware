@@ -67,6 +67,22 @@ typedef struct
     bool latched;
 } bolus_fault_descriptor_t;
 
+/* Sticky, RAM-only Watch data: even transient faults remain inspectable. */
+typedef struct
+{
+    uint32_t raise_call_count;
+    uint32_t newly_active_count;
+    uint32_t repeat_raise_count;
+    uint32_t clear_count;
+    bolus_fault_mask_t active_mask;
+    bolus_fault_mask_t history_mask;
+    uint8_t last_raised_id;
+    uint8_t last_cleared_id;
+    uint16_t raises_by_id[BOLUS_FAULT_COUNT];
+} fault_manager_diag_t;
+
+extern volatile fault_manager_diag_t fault_manager_diag;
+
 void FaultManager_Init(void);
 
 /* New Phase 5 API. */
