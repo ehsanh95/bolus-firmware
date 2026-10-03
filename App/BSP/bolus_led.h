@@ -3,6 +3,15 @@
 
 #include <stdbool.h>
 
+/* Debug on; Release off. Set -DBOLUS_BENCH_LED_DIAGNOSTICS=0 for power tests. */
+#ifndef BOLUS_BENCH_LED_DIAGNOSTICS
+# if defined(DEBUG)
+#  define BOLUS_BENCH_LED_DIAGNOSTICS 1
+# else
+#  define BOLUS_BENCH_LED_DIAGNOSTICS 0
+# endif
+#endif
+
 typedef enum
 {
     BOLUS_LED_SENSOR = 0,
