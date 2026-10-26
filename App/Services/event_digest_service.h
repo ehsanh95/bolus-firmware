@@ -15,6 +15,7 @@ typedef struct
     uint8_t count;
     uint32_t pushed_count;
     uint32_t overflow_count;
+    uint32_t overflow_pending_count;
     bool overflow_latched;
 } event_digest_service_t;
 
@@ -40,5 +41,6 @@ uint8_t EventDigestService_SnapshotAndClear(
     uint8_t capacity);
 
 bool EventDigestService_ConsumeOverflow(event_digest_service_t *service);
+uint8_t EventDigestService_ConsumeDroppedCount(event_digest_service_t *service);
 
 #endif
