@@ -1,4 +1,4 @@
-// Bolus Telemetry V2/V2.1/V2.2 uplink decoder for ChirpStack v4 JavaScript codec.
+// Bolus Telemetry V2/V2.1/V2.2/V3/V4 uplink decoder for ChirpStack v4 JavaScript codec.
 //
 // STATUS: DECODER IMPLEMENTED AND OFFLINE VECTOR-TESTED.
 // The 32-byte Telemetry V2 wire contract remains frozen and V2.1 appends a
@@ -12,7 +12,7 @@
 // ChirpStack provides input.bytes and input.fPort to decodeUplink(input).
 //
 // Bolus application uplinks:
-//   FPort 2: Telemetry V2 (32B), V2.1 (42B), or compact V2.2 (38B) summary.
+//   FPort 2: Telemetry V2/V2.1/V2.2 legacy plus variable-length V3/V4.
 //   FPort 4: Downlink ACK/NACK control response, exactly 8 bytes.
 //   FPort 3: Reserved for application downlinks; it is not an uplink payload.
 //
