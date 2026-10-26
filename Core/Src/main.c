@@ -205,24 +205,25 @@ uint16_t event_episode_last_mpu_sample_count = 0U;
 uint16_t event_episode_last_mpu_peak_gyro_dps = 0U;
 uint16_t event_episode_last_mpu_orientation_change_cdeg = 0U;
 
-/* Episode digests + active Telemetry V3 transport. */
+/* Episode digests + active Telemetry V4 transport. */
 event_digest_service_t event_digest_service = {0};
 bolus_event_digest_t telemetry_frozen_digests[EVENT_DIGEST_CAPACITY] = {0};
 uint8_t telemetry_frozen_digest_count = 0U;
 uint8_t telemetry_frozen_digest_offset = 0U;
-uint8_t telemetry_v3_continuation_index = 1U;
-bool telemetry_v3_more = false;
+uint8_t telemetry_v4_continuation_index = 1U;
+uint8_t telemetry_v4_packet_total = 1U;
+bool telemetry_v4_more = false;
 bool telemetry_digest_overflow = false;
 
 telemetry_window_service_t telemetry_window_service = {0};
 telemetry_window_status_t telemetry_window_status = TELEMETRY_WINDOW_ERROR_CONFIG;
 bolus_telemetry_summary_v2_2_t telemetry_frozen_summary_v2_2 = {0};
 telemetry_codec_status_t telemetry_codec_status = TELEMETRY_CODEC_ERROR_PARAM;
-uint8_t telemetry_payload_v3[BOLUS_TELEMETRY_V3_MAX_PACKET_SIZE] = {0};
-size_t telemetry_payload_v3_size = 0U;
+uint8_t telemetry_payload_v4[BOLUS_TELEMETRY_V4_MAX_PACKET_SIZE] = {0};
+size_t telemetry_payload_v4_size = 0U;
 bool telemetry_window_ready = false;
-bool telemetry_payload_v3_ready = false;
-uint32_t telemetry_payload_v3_queued_count = 0U;
+bool telemetry_payload_v4_ready = false;
+uint32_t telemetry_payload_v4_queued_count = 0U;
 uint32_t telemetry_snapshot_count = 0U;
 uint32_t telemetry_snapshot_failure_count = 0U;
 uint16_t telemetry_last_battery_mv = 0U;
@@ -547,7 +548,7 @@ static bool LowPower_CanEnterStop2(void)
     if (BenchLedDiagnostics_IsPresenting(HAL_GetTick()))
         return false;
 #endif
-    if (!low_power_rtc_ready || telemetry_payload_v3_ready)
+    if (!low_power_rtc_ready || telemetry_payload_v4_ready)
         return false;
 
     if (radio_tx_service_ready && RadioTxService_IsBusy())
@@ -1261,7 +1262,7 @@ int main(void)
     }
 
     if (telemetry_window_ready &&
-        !telemetry_payload_v3_ready &&
+        !telemetry_payload_v4_ready &&
         (!radio_tx_service_ready || !RadioTxService_IsRadioCritical()) &&
         TelemetryWindow_IsDue(&telemetry_window_service, now_ms))
     {
@@ -1270,7 +1271,16 @@ int main(void)
         bool fault_present;
         uint8_t consumed = 0U;
         bool more = false;
+        uint32_t boundary_ms = now_ms;
+        event_episode_carry_state_t carry_state = {0};
+        bool boundary_temperature_valid = false;
+        int32_t boundary_temperature_mdeg_c = 0;
 
+        /*
+         * Boundary ordering is deliberate:
+         * final sensor samples -> hard-close active Episode -> digest snapshot
+         * -> window freeze -> apply pending config -> optional CARRY restart.
+         */
         if (tmp_service_ready)
         {
             tmp_service_read_status =
@@ -1278,9 +1288,24 @@ int main(void)
             tmp_service_last_read_tick = HAL_GetTick();
 
             if (tmp_service_read_status == SENSOR_SERVICE_OK)
+            {
+                boundary_temperature_valid = true;
+                boundary_temperature_mdeg_c =
+                    tmp_service_sample.temperature_mdeg_c;
+
                 TelemetryWindow_RecordTemperature(
                     &telemetry_window_service,
-                    tmp_service_sample.temperature_mdeg_c);
+                    boundary_temperature_mdeg_c);
+
+                if (event_episode_ready &&
+                    EventEpisodeService_IsActive(&event_episode_service))
+                {
+                    (void)EventEpisodeService_RecordTemperature(
+                        &event_episode_service,
+                        EVENT_EPISODE_TEMP_SOURCE_BOUNDARY,
+                        boundary_temperature_mdeg_c);
+                }
+            }
         }
 
         telemetry_last_step_delta = 0U;
@@ -1306,6 +1331,36 @@ int main(void)
             }
         }
 
+        if (event_episode_ready &&
+            EventEpisodeService_IsActive(&event_episode_service))
+        {
+            event_episode_service_status =
+                EventEpisodeService_ForceClose(
+                    &event_episode_service,
+                    boundary_ms,
+                    EVENT_EPISODE_CLOSE_TELEMETRY_BOUNDARY,
+                    &carry_state,
+                    &event_episode_action);
+
+            if (event_episode_service_status == EVENT_EPISODE_OK)
+            {
+                HandleEventEpisodeAction(&event_episode_action);
+            }
+        }
+
+        /* A quiet window still produces one explicit baseline Episode. */
+        if (event_digest_service.count == 0U)
+        {
+            (void)EventDigestService_PushBaseline(
+                &event_digest_service,
+                telemetry_window_service.window_start_ms,
+                boundary_ms,
+                telemetry_window_service.temperature_valid,
+                telemetry_window_service.temperature_min_mdeg_c,
+                telemetry_window_service.temperature_max_mdeg_c,
+                telemetry_window_service.temperature_current_mdeg_c);
+        }
+
         battery_mv_status =
             Battery_ReadMillivolts(&telemetry_last_battery_mv);
 
@@ -1326,13 +1381,15 @@ int main(void)
                 telemetry_frozen_digests,
                 EVENT_DIGEST_CAPACITY);
         telemetry_frozen_digest_offset = 0U;
-        telemetry_v3_continuation_index = 1U;
+        telemetry_v4_continuation_index = 1U;
+        telemetry_v4_packet_total =
+            TelemetryCodec_V4PacketCount(telemetry_frozen_digest_count);
 
         telemetry_window_status =
             TelemetryWindow_FreezeSummaryV2_2(
                 &telemetry_window_service,
                 &sensor_service_config,
-                HAL_GetTick(),
+                boundary_ms,
                 telemetry_last_battery_mv,
                 fault_present,
                 (health == BOLUS_HEALTH_DEGRADED),
@@ -1344,8 +1401,61 @@ int main(void)
             uint16_t suppressed =
                 telemetry_frozen_summary_v2_2.v2.suppressed_pulse_count;
 
+            /*
+             * A hard boundary creates a safe point for deferred live config.
+             * Re-evaluate thermal carry against the newly applied thresholds.
+             */
+            ApplyPendingRuntimeConfig();
+
+            if (carry_state.thermal_active && boundary_temperature_valid)
+            {
+                uint8_t thermal_flags = 0U;
+
+                if (boundary_temperature_mdeg_c >=
+                    ((int32_t)sensor_service_config.temperature.high_limit_centi_c *
+                     10L))
+                {
+                    thermal_flags |= EVENT_EPISODE_SOURCE_TEMP_HIGH;
+                }
+                if (boundary_temperature_mdeg_c <=
+                    ((int32_t)sensor_service_config.temperature.low_limit_centi_c *
+                     10L))
+                {
+                    thermal_flags |= EVENT_EPISODE_SOURCE_TEMP_LOW;
+                }
+
+                carry_state.thermal_flags = thermal_flags;
+                carry_state.thermal_active = thermal_flags != 0U;
+                carry_state.valid =
+                    carry_state.motion_active ||
+                    carry_state.thermal_active;
+            }
+
+            if (event_episode_ready && carry_state.valid)
+            {
+                event_episode_service_status =
+                    EventEpisodeService_StartCarry(
+                        &event_episode_service,
+                        boundary_ms,
+                        &carry_state,
+                        &event_episode_action);
+
+                if (event_episode_service_status == EVENT_EPISODE_OK)
+                {
+                    HandleEventEpisodeAction(&event_episode_action);
+
+                    if (carry_state.thermal_active)
+                    {
+                        tmp_thermal_latched = true;
+                        TmpIrqDiag_Disable();
+                        tmp_thermal_next_check_tick =
+                            boundary_ms + ThermalFollowupMs();
+                    }
+                }
+            }
+
             telemetry_codec_status =
-                TelemetryCodec_EncodeSummaryV3(
+                TelemetryCodec_EncodeSummaryV4(
                     &telemetry_frozen_summary_v2_2,
                     (uint8_t)(
                         ((uint8_t)sensor_service_config.acquisition_level & 0x07U) |
@@ -1356,17 +1466,17 @@ int main(void)
                     (suppressed > 255U) ? 255U : (uint8_t)suppressed,
                     telemetry_frozen_digests,
                     telemetry_frozen_digest_count,
-                    telemetry_payload_v3,
-                    sizeof(telemetry_payload_v3),
-                    &telemetry_payload_v3_size,
+                    telemetry_payload_v4,
+                    sizeof(telemetry_payload_v4),
+                    &telemetry_payload_v4_size,
                     &consumed,
                     &more);
 
             if (telemetry_codec_status == TELEMETRY_CODEC_OK)
             {
                 telemetry_frozen_digest_offset = consumed;
-                telemetry_v3_more = more;
-                telemetry_payload_v3_ready = true;
+                telemetry_v4_more = more;
+                telemetry_payload_v4_ready = true;
                 telemetry_snapshot_count++;
             }
             else
@@ -1381,56 +1491,58 @@ int main(void)
     }
 
     if (radio_tx_service_ready &&
-        telemetry_payload_v3_ready &&
-        (telemetry_payload_v3_size > 0U) &&
+        telemetry_payload_v4_ready &&
+        (telemetry_payload_v4_size > 0U) &&
         RadioTxService_CanAccept())
     {
         radio_tx_service_submit_status =
             RadioTxService_Submit(
-                telemetry_payload_v3,
-                (uint8_t)telemetry_payload_v3_size,
+                telemetry_payload_v4,
+                (uint8_t)telemetry_payload_v4_size,
                 telemetry_frozen_summary_v2_2.v2.sequence);
 
         if (radio_tx_service_submit_status == RADIO_TX_SERVICE_OK)
         {
             uint8_t consumed = 0U;
             bool more = false;
-            telemetry_payload_v3_queued_count++;
+            telemetry_payload_v4_queued_count++;
 
-            if (telemetry_v3_more &&
+            if (telemetry_v4_more &&
                 (telemetry_frozen_digest_offset <
                  telemetry_frozen_digest_count))
             {
                 telemetry_codec_status =
-                    TelemetryCodec_EncodeContinuationV3(
+                    TelemetryCodec_EncodeContinuationV4(
                         telemetry_frozen_summary_v2_2.v2.sequence,
-                        telemetry_v3_continuation_index++,
+                        telemetry_v4_continuation_index++,
+                        telemetry_v4_packet_total,
+                        telemetry_frozen_digest_count,
                         &telemetry_frozen_digests[
                             telemetry_frozen_digest_offset],
                         (uint8_t)(telemetry_frozen_digest_count -
                                   telemetry_frozen_digest_offset),
-                        telemetry_payload_v3,
-                        sizeof(telemetry_payload_v3),
-                        &telemetry_payload_v3_size,
+                        telemetry_payload_v4,
+                        sizeof(telemetry_payload_v4),
+                        &telemetry_payload_v4_size,
                         &consumed,
                         &more);
 
                 if (telemetry_codec_status == TELEMETRY_CODEC_OK)
                 {
                     telemetry_frozen_digest_offset += consumed;
-                    telemetry_v3_more = more;
-                    telemetry_payload_v3_ready = true;
+                    telemetry_v4_more = more;
+                    telemetry_payload_v4_ready = true;
                 }
                 else
                 {
-                    telemetry_payload_v3_ready = false;
+                    telemetry_payload_v4_ready = false;
                     telemetry_snapshot_failure_count++;
                 }
             }
             else
             {
-                telemetry_payload_v3_ready = false;
-                telemetry_v3_more = false;
+                telemetry_payload_v4_ready = false;
+                telemetry_v4_more = false;
                 telemetry_frozen_digest_count = 0U;
                 telemetry_frozen_digest_offset = 0U;
             }
@@ -1438,7 +1550,7 @@ int main(void)
     }
 
     if (telemetry_window_ready &&
-        telemetry_payload_v3_ready &&
+        telemetry_payload_v4_ready &&
         TelemetryWindow_IsDue(&telemetry_window_service, HAL_GetTick()))
     {
         if (!s_telemetry_backpressure_latched)
@@ -1447,7 +1559,7 @@ int main(void)
             s_telemetry_backpressure_latched = true;
         }
     }
-    else if (!telemetry_payload_v3_ready)
+    else if (!telemetry_payload_v4_ready)
     {
         s_telemetry_backpressure_latched = false;
     }
