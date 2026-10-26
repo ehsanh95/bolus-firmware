@@ -50,6 +50,7 @@ bool EventDigestService_PushClosedEpisode(
     if (service->count >= EVENT_DIGEST_CAPACITY)
     {
         service->overflow_count++;
+        service->overflow_pending_count++;
         service->overflow_latched = true;
         return false;
     }
@@ -191,6 +192,7 @@ uint8_t EventDigestService_SnapshotAndClear(
     if (count < service->count)
     {
         service->overflow_count += (uint32_t)(service->count - count);
+        service->overflow_pending_count += (uint32_t)(service->count - count);
         service->overflow_latched = true;
     }
 
@@ -211,4 +213,19 @@ bool EventDigestService_ConsumeOverflow(event_digest_service_t *service)
     value = service->overflow_latched;
     service->overflow_latched = false;
     return value;
+}
+
+uint8_t EventDigestService_ConsumeDroppedCount(event_digest_service_t *service)
+{
+    uint32_t value;
+
+    if (service == NULL)
+    {
+        return 0U;
+    }
+
+    value = service->overflow_pending_count;
+    service->overflow_pending_count = 0U;
+
+    return (value > UINT8_MAX) ? UINT8_MAX : (uint8_t)value;
 }
