@@ -43,6 +43,22 @@ const telemetryV3 = [
   0x12, 0x0E, 0x29
 ];
 
+const telemetryV4 = [
+  0x61, 0x10, 0x00, 0x0B, 0x83, 0x03, 0xF8, 0x0C,
+  0x8D, 0x09, 0x8C, 0x09, 0x94, 0x09, 0x56, 0x00,
+  0x03, 0x02, 0x08,
+  0x0A, 0x00, 0x0D, 0x03, 0x0C, 0x02, 0x8C, 0x9C,
+  0x94, 0x14, 0x32, 0x19, 0x03, 0x2D, 0x03, 0x02,
+  0x64, 0x00, 0x0D, 0x00, 0x0C, 0x02, 0x8C, 0x9C,
+  0x94, 0x14, 0x32, 0x19, 0x03, 0x20, 0x02, 0x02
+];
+
+const telemetryV4Continuation = [
+  0x62, 0x10, 0x00, 0x01, 0x02, 0x03, 0x01,
+  0xDC, 0x00, 0x0D, 0x03, 0x0C, 0x02, 0x8C, 0x9C,
+  0x94, 0x14, 0x32, 0x19, 0x03, 0xAD, 0x03, 0x02
+];
+
 for (const relativePath of decoderPaths) {
   const context = vm.createContext({});
   const source = fs.readFileSync(path.join(repositoryRoot, relativePath), 'utf8');
@@ -101,6 +117,27 @@ for (const relativePath of decoderPaths) {
   assert.strictEqual(v3.data.episodes[0].temperature_change_c, -0.3);
   assert.strictEqual(v3.data.episodes[0].flags.mpu_used, true);
 
+  const v4 = context.decodeUplink({ fPort: 2, bytes: telemetryV4 });
+  assert.strictEqual(v4.data.version, 'V4');
+  assert.strictEqual(v4.data.protocol.sequence, 0x0010);
+  assert.strictEqual(v4.data.protocol.payload_size_bytes, 51);
+  assert.strictEqual(v4.data.activity.episode_total, 3);
+  assert.strictEqual(v4.data.activity.packet_total, 2);
+  assert.strictEqual(v4.data.episodes.length, 2);
+  assert.strictEqual(v4.data.episodes[0].temperature.min_c, 35);
+  assert.strictEqual(v4.data.episodes[0].temperature.max_c, 39);
+  assert.strictEqual(v4.data.episodes[0].temperature.end_c, 37);
+  assert.strictEqual(v4.data.episodes[0].suppressed_trigger_count, 2);
+  assert.strictEqual(v4.data.episodes[0].close_reason.name, 'TELEMETRY_BOUNDARY');
+  assert.strictEqual(v4.data.episodes[0].flags.temperature_low, true);
+
+  const v4c = context.decodeUplink({ fPort: 2, bytes: telemetryV4Continuation });
+  assert.strictEqual(v4c.data.version, 'V4');
+  assert.strictEqual(v4c.data.continuation.packet_index, 1);
+  assert.strictEqual(v4c.data.continuation.packet_total, 2);
+  assert.strictEqual(v4c.data.continuation.episode_total, 3);
+  assert.strictEqual(v4c.data.episodes[0].flags.carry_from_previous_window, true);
+
   const modernAck = context.decodeUplink({ fPort: 4, bytes: [0xD2,0x01,0x33,0x00,0x75,0x00,0x0C,0x00] });
   assert.ok(modernAck.data.apply_mask.pending_subsystems.includes('TMP_SENSOR'));
   assert.strictEqual(modernAck.data.runtime_config_version, 12);
@@ -157,8 +194,12 @@ assert.strictEqual(configuratorCompact.protocol.version_name, 'V2.2');
 const configuratorV3 = configuratorContext.decodeTelemetry(telemetryV3);
 assert.strictEqual(configuratorV3.protocol.version_name, 'V3');
 assert.strictEqual(configuratorV3.episodes[0].pulse_count, 3);
+const configuratorV4 = configuratorContext.decodeTelemetry(telemetryV4);
+assert.strictEqual(configuratorV4.protocol.version_name, 'V4');
+assert.strictEqual(configuratorV4.activity.episode_total, 3);
+assert.strictEqual(configuratorV4.episodes[0].temperature.end_c, 37);
 assert.strictEqual(configuratorCompact.battery.voltage_mv, 3320);
 assert.ok(!Object.prototype.hasOwnProperty.call(configuratorCompact.battery, 'percent'));
 assert.ok(!Object.prototype.hasOwnProperty.call(configuratorCompact.temperature, 'current_centi_c'));
 
-console.log('Telemetry V2/V2.1/V2.2/V3 decoder vectors passed.');
+console.log('Telemetry V2/V2.1/V2.2/V3/V4 decoder vectors passed.');
