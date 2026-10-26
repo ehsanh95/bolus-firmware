@@ -133,6 +133,9 @@ int main(void)
                    3U,
                    false,
                    86U,
+                   300U,
+                   6U,
+                   1U,
                    8U,
                    digests,
                    3U,
@@ -148,6 +151,11 @@ int main(void)
         assert(payload[0] == 0x61U);
         assert(payload[1] == 0x10U && payload[2] == 0x00U);
         assert(payload[4] == 0x83U);
+        assert(payload[8] == 86U && payload[9] == 0U);
+        assert(payload[10] == 3U && payload[11] == 0U);
+        assert(payload[12] == 0x2CU && payload[13] == 0x01U);
+        assert(payload[14] == 6U);
+        assert(payload[15] == 1U);
         assert(payload[16] == 3U);
         assert(payload[17] == 2U);
         assert(payload[18] == 8U);
