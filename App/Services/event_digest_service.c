@@ -145,6 +145,7 @@ bool EventDigestService_PushBaseline(
     if (service->count >= EVENT_DIGEST_CAPACITY)
     {
         service->overflow_count++;
+        service->overflow_pending_count++;
         service->overflow_latched = true;
         return false;
     }
