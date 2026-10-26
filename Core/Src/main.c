@@ -1275,6 +1275,9 @@ int main(void)
         event_episode_carry_state_t carry_state = {0};
         bool boundary_temperature_valid = false;
         int32_t boundary_temperature_mdeg_c = 0;
+        uint16_t telemetry_window_duration_s = 0U;
+        uint8_t telemetry_temperature_sample_count = 0U;
+        uint8_t telemetry_dropped_episode_count = 0U;
 
         /*
          * Boundary ordering is deliberate:
@@ -1372,8 +1375,25 @@ int main(void)
         health = FaultManager_GetHealth();
         fault_present = (FaultManager_GetActiveMask() != 0U);
 
+        {
+            uint32_t window_duration_ms =
+                boundary_ms - telemetry_window_service.window_start_ms;
+            uint32_t window_duration_s =
+                (window_duration_ms + 500UL) / 1000UL;
+
+            telemetry_window_duration_s =
+                (window_duration_s > 0xFFFFUL) ?
+                0xFFFFU : (uint16_t)window_duration_s;
+            telemetry_temperature_sample_count =
+                (telemetry_window_service.temperature_sample_count > 255U) ?
+                255U :
+                (uint8_t)telemetry_window_service.temperature_sample_count;
+        }
+
         telemetry_digest_overflow =
             EventDigestService_ConsumeOverflow(&event_digest_service);
+        telemetry_dropped_episode_count =
+            EventDigestService_ConsumeDroppedCount(&event_digest_service);
 
         telemetry_frozen_digest_count =
             EventDigestService_SnapshotAndClear(
@@ -1469,6 +1489,9 @@ int main(void)
                          0x80U : 0U)),
                     telemetry_digest_overflow,
                     telemetry_last_step_delta,
+                    telemetry_window_duration_s,
+                    telemetry_temperature_sample_count,
+                    telemetry_dropped_episode_count,
                     (suppressed > 255U) ? 255U : (uint8_t)suppressed,
                     telemetry_frozen_digests,
                     telemetry_frozen_digest_count,
