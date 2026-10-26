@@ -1429,6 +1429,12 @@ int main(void)
                 carry_state.valid =
                     carry_state.motion_active ||
                     carry_state.thermal_active;
+
+                if (!carry_state.thermal_active)
+                {
+                    tmp_thermal_latched = false;
+                    TmpIrqDiag_EnableCounterOnly();
+                }
             }
 
             if (event_episode_ready && carry_state.valid)
