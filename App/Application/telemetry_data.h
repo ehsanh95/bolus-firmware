@@ -119,6 +119,7 @@ typedef bolus_telemetry_summary_v2_1_t bolus_telemetry_summary_v2_2_t;
 
 typedef struct
 {
+    /* Fields used by the frozen V3 encoder. */
     uint16_t start_offset_s;
     uint16_t duration_s;
     uint8_t pulse_count;
@@ -129,6 +130,14 @@ typedef struct
     uint16_t peak_angular_velocity_dps;
     uint16_t orientation_change_cdeg;
     uint8_t flags;
+
+    /* V4 additions. Kept in application units until the wire encoder quantizes. */
+    uint8_t suppressed_trigger_count;
+    int16_t temperature_min_centi_c;
+    int16_t temperature_max_centi_c;
+    int16_t temperature_end_centi_c;
+    uint8_t close_reason;
+    uint8_t mpu_burst_count;
 } bolus_event_digest_t;
 
 #define BOLUS_EVENT_DIGEST_FLAG_MOTION          (1U << 0)
@@ -139,5 +148,12 @@ typedef struct
 #define BOLUS_EVENT_DIGEST_FLAG_TEMP_VALID      (1U << 5)
 #define BOLUS_EVENT_DIGEST_FLAG_MPU_FAILED      (1U << 6)
 #define BOLUS_EVENT_DIGEST_FLAG_CARRY           (1U << 7)
+
+/* Episode close reasons serialized by Telemetry V4. */
+#define BOLUS_EVENT_CLOSE_UNSPECIFIED            0U
+#define BOLUS_EVENT_CLOSE_MOTION_QUIET           1U
+#define BOLUS_EVENT_CLOSE_TEMP_NORMAL            2U
+#define BOLUS_EVENT_CLOSE_TELEMETRY_BOUNDARY     3U
+#define BOLUS_EVENT_CLOSE_MAX_DURATION           4U
 
 #endif /* TELEMETRY_DATA_H */
