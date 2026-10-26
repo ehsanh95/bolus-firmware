@@ -11,6 +11,7 @@
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V2_1     3U
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V2_2     4U
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V3       5U
+#define BOLUS_TELEMETRY_PROTOCOL_VERSION_V4       6U
 #define BOLUS_TELEMETRY_MESSAGE_TYPE_SUMMARY      1U
 #define BOLUS_TELEMETRY_MESSAGE_TYPE_CONTINUATION 2U
 #define BOLUS_TELEMETRY_SUMMARY_V1_SIZE           24U
@@ -23,6 +24,14 @@
 #define BOLUS_TELEMETRY_V3_MAX_PACKET_SIZE         51U
 #define BOLUS_TELEMETRY_V3_SUMMARY_DIGESTS          3U
 #define BOLUS_TELEMETRY_V3_CONT_DIGESTS             4U
+
+/* Telemetry V4: hard window boundaries + richer 16-byte Episode records. */
+#define BOLUS_TELEMETRY_V4_HEADER_SIZE               19U
+#define BOLUS_TELEMETRY_V4_CONT_HEADER_SIZE           7U
+#define BOLUS_TELEMETRY_V4_DIGEST_SIZE               16U
+#define BOLUS_TELEMETRY_V4_MAX_PACKET_SIZE           51U
+#define BOLUS_TELEMETRY_V4_SUMMARY_DIGESTS            2U
+#define BOLUS_TELEMETRY_V4_CONT_DIGESTS               2U
 
 /* Legacy V1 status bits. */
 #define BOLUS_TELEMETRY_STATUS_TEMP_VALID         (1U << 0)
@@ -154,6 +163,66 @@ telemetry_codec_status_t TelemetryCodec_EncodeSummaryV3(
 telemetry_codec_status_t TelemetryCodec_EncodeContinuationV3(
     uint16_t sequence,
     uint8_t packet_index,
+    const bolus_event_digest_t *digests,
+    uint8_t digest_count,
+    uint8_t *payload,
+    size_t payload_capacity,
+    size_t *payload_size,
+    uint8_t *digests_consumed,
+    bool *more);
+
+/*
+ * V4 summary header (19 bytes):
+ *   0      version/type = 0x61
+ *   1..2   telemetry sequence
+ *   3      runtime config version
+ *   4      status bitmap
+ *   5      acquisition/custom profile
+ *   6..7   battery mV
+ *   8..13  current/min/max temperature, centi-C
+ *   14..15 step delta
+ *   16     total Episode count for this telemetry window
+ *   17     total packet count (summary + continuations)
+ *   18     suppressed trigger count for the whole window
+ *
+ * Each V4 Episode record is 16 bytes:
+ *   0..1   start offset, seconds
+ *   2      duration / 5 s
+ *   3      accepted pulse count
+ *   4      mean inter-pulse interval, seconds
+ *   5      suppressed trigger count
+ *   6      min temperature / 0.25 C
+ *   7      max temperature / 0.25 C
+ *   8      end temperature / 0.25 C
+ *   9      RMS dynamic acceleration / 20 mg
+ *   10     peak dynamic acceleration / 20 mg
+ *   11     peak angular velocity / 10 dps
+ *   12     max orientation change / 2 degrees
+ *   13     Episode flags
+ *   14     close reason
+ *   15     MPU burst count
+ */
+uint8_t TelemetryCodec_V4PacketCount(uint8_t digest_count);
+
+telemetry_codec_status_t TelemetryCodec_EncodeSummaryV4(
+    const bolus_telemetry_summary_v2_2_t *summary,
+    uint8_t acquisition_profile,
+    bool digest_overflow,
+    uint16_t step_delta,
+    uint8_t suppressed_trigger_count,
+    const bolus_event_digest_t *digests,
+    uint8_t digest_count,
+    uint8_t *payload,
+    size_t payload_capacity,
+    size_t *payload_size,
+    uint8_t *digests_consumed,
+    bool *more);
+
+telemetry_codec_status_t TelemetryCodec_EncodeContinuationV4(
+    uint16_t sequence,
+    uint8_t packet_index,
+    uint8_t packet_total,
+    uint8_t episode_total,
     const bolus_event_digest_t *digests,
     uint8_t digest_count,
     uint8_t *payload,
