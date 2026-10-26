@@ -134,6 +134,8 @@ void TelemetryWindow_RecordTemperature(
         return;
     }
 
+    IncrementSaturatingU16(&service->temperature_sample_count);
+
     if (!service->temperature_valid)
     {
         service->temperature_valid = true;
@@ -278,8 +280,12 @@ telemetry_window_status_t TelemetryWindow_FreezeSummaryV2(
     summary->max_negative_excursion_mdeg_c =
         service->max_negative_excursion_mdeg_c;
 
-    summary->motion_valid =
-        ((service->accepted_pulse_count > 0U) || (service->episode_count > 0U));
+    /*
+     * motion_valid means motion was actually observed in this window.
+     * Carried Motion state remains visible in Episode flags, but a thermal-only
+     * Episode must not make this summary bit true.
+     */
+    summary->motion_valid = (service->accepted_pulse_count > 0U);
     summary->episode_count = service->episode_count;
     summary->accepted_pulse_count = service->accepted_pulse_count;
     summary->suppressed_pulse_count = service->suppressed_pulse_count;
