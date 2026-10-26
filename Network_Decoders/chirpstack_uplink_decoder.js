@@ -479,13 +479,12 @@ function bolusDecodeTelemetryV4(bytes) {
         acquisition_level: bytes[5] & 0x07,
         custom_profile: !!(bytes[5] & 0x80),
         battery: { voltage_mv: bolusU16Le(bytes, 6) },
-        temperature: {
-          current_c: bolusI16Le(bytes, 8) / 100,
-          min_c: bolusI16Le(bytes, 10) / 100,
-          max_c: bolusI16Le(bytes, 12) / 100
-        },
         activity: {
-          steps_delta: bolusU16Le(bytes, 14),
+          steps_delta: bolusU16Le(bytes, 8),
+          accepted_pulse_count: bolusU16Le(bytes, 10),
+          window_duration_s: bolusU16Le(bytes, 12),
+          temperature_sample_count: bytes[14],
+          dropped_episode_count: bytes[15],
           episode_total: episodeTotal,
           packet_total: packetTotal,
           suppressed_trigger_count: bytes[18]
