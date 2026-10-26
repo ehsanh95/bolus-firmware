@@ -105,7 +105,37 @@ static void episodes(void) {
     assert(a.take_temperature_now && a.temperature_source==EVENT_EPISODE_TEMP_SOURCE_FIRST_PULSE);
     assert(s.followup_active && s.next_followup_due_ms==25000);
     EventEpisodeService_Poll(&s,25000,&a);assert(a.take_temperature_now && s.next_followup_due_ms==35000);
-    EventEpisodeService_Poll(&s,901000,&a);assert(a.episode_closed);
+
+    /* Combined Episode must split at motion quiet even while thermal stays active. */
+    EventEpisodeService_Poll(&s,140000,&a);
+    assert(a.episode_closed && a.episode_started && s.active);
+    assert(s.thermal_active);
+    assert((s.source_flags & EVENT_EPISODE_SOURCE_TEMP_HIGH) != 0);
+    assert((s.source_flags & EVENT_EPISODE_SOURCE_MOTION) == 0);
+    event_episode_summary_t closed={0};
+    assert(EventEpisodeService_GetLastClosedSummary(&s,&closed)==EVENT_EPISODE_OK);
+    assert(closed.close_reason==EVENT_EPISODE_CLOSE_MOTION_QUIET);
+    assert((closed.source_flags & EVENT_EPISODE_SOURCE_MOTION) != 0);
+
+    EventEpisodeService_OnThermalNormal(&s,150000,&a);
+    assert(a.episode_closed && !s.active);
+    assert(EventEpisodeService_GetLastClosedSummary(&s,&closed)==EVENT_EPISODE_OK);
+    assert(closed.close_reason==EVENT_EPISODE_CLOSE_TEMP_NORMAL);
+
+    /* Telemetry boundary hard-close returns a carry state and preserves motion deadline. */
+    EventEpisodeService_Init(&s,&config);
+    EventEpisodeService_OnMotionPulse(&s,0,&a);
+    event_episode_carry_state_t carry={0};
+    EventEpisodeService_ForceClose(
+        &s,60000,EVENT_EPISODE_CLOSE_TELEMETRY_BOUNDARY,&carry,&a);
+    assert(a.episode_closed && !s.active && carry.valid && carry.motion_active);
+    assert(EventEpisodeService_GetLastClosedSummary(&s,&closed)==EVENT_EPISODE_OK);
+    assert(closed.close_reason==EVENT_EPISODE_CLOSE_TELEMETRY_BOUNDARY);
+    EventEpisodeService_StartCarry(&s,60000,&carry,&a);
+    assert(a.episode_started && s.active && s.carry_from_previous_window);
+    assert(s.close_deadline_ms==120000);
+    EventEpisodeService_Poll(&s,120000,&a);
+    assert(a.episode_closed && !s.active);
     EventEpisodeService_Init(&s,&config);
     EventEpisodeService_OnMotionPulse(&s,UINT32_MAX-99,&a);
     EventEpisodeService_OnMotionPulse(&s,0,&a);assert(a.pulse_suppressed_by_guard);
@@ -117,6 +147,6 @@ static void episodes(void) {
         EventEpisodeService_OnMotionPulse(&s,100,&a);
         assert(a.take_mpu_burst_now==(level!=0));
     }
-    puts("PASS: tick-zero guard, wraparound, quiet/max close, mixed thermal/motion followups, acquisition levels");
+    puts("PASS: episode split/carry boundaries, wraparound, followups, acquisition levels");
 }
 int main(void) { commands(); malformed(); fuzz(); episodes(); return 0; }
