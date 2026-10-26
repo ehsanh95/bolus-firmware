@@ -1,4 +1,4 @@
-// Bolus Telemetry V2/V2.1/V2.2 uplink decoder for The Things Stack / TTN.
+// Bolus Telemetry V2/V2.1/V2.2/V3/V4 uplink decoder for The Things Stack / TTN.
 //
 // STATUS: DECODER IMPLEMENTED AND OFFLINE VECTOR-TESTED.
 // The 32-byte Telemetry V2 wire contract remains frozen and V2.1 appends a
@@ -10,7 +10,7 @@
 // Application (or End Device) -> Payload formatters -> Uplink -> JavaScript.
 //
 // Bolus application uplinks:
-//   FPort 2: Telemetry V2 (32B), V2.1 (42B), or compact V2.2 (38B) summary.
+//   FPort 2: Telemetry V2/V2.1/V2.2 legacy plus variable-length V3/V4.
 //   FPort 4: Downlink ACK/NACK control response, exactly 8 bytes.
 //   FPort 3: Reserved for application downlinks; it is not an uplink payload.
 //
