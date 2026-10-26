@@ -236,6 +236,8 @@ volatile uint32_t low_power_early_wake_count = 0U;
 volatile uint32_t low_power_last_sleep_ms = 0U;
 volatile uint32_t low_power_total_sleep_ms = 0U;
 volatile uint32_t low_power_reject_busy_count = 0U;
+volatile uint32_t low_power_adc_clock_restore_count = 0U;
+volatile uint32_t low_power_adc_clock_restore_failure_count = 0U;
 static volatile bool s_low_power_rtc_irq_seen = false;
 /* USER CODE END PV */
 
@@ -251,6 +253,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_IWDG_Init(void);
 /* USER CODE BEGIN PFP */
 static bool LowPower_RtcInit(void);
+static bool LowPower_RestoreAdcClock(void);
 static bool LowPower_TryEnterStop2(uint32_t idle_budget_ms);
 static uint32_t LowPower_ComputeIdleBudget(uint32_t now_ms);
 static void ApplyPendingRuntimeConfig(void);
@@ -360,6 +363,39 @@ static bool LowPower_RtcInit(void)
     HAL_NVIC_SetPriority(RTC_WKUP_IRQn, 7U, 0U);
     HAL_NVIC_EnableIRQ(RTC_WKUP_IRQn);
 
+    return true;
+}
+
+static bool LowPower_RestoreAdcClock(void)
+{
+    RCC_PeriphCLKInitTypeDef periph_clk = {0};
+
+    /*
+     * ADC1 uses PLLSAI1 as its asynchronous clock source. STOP2 disables
+     * PLLSAI1, while SystemClock_Config() only restores the main system PLL.
+     * Recreate the ADC peripheral-clock configuration after every STOP2 wake.
+     *
+     * Keep these values in sync with HAL_ADC_MspInit() in
+     * Core/Src/stm32l4xx_hal_msp.c.
+     */
+    periph_clk.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+    periph_clk.AdcClockSelection = RCC_ADCCLKSOURCE_PLLSAI1;
+    periph_clk.PLLSAI1.PLLSAI1Source = RCC_PLLSOURCE_HSE;
+    periph_clk.PLLSAI1.PLLSAI1M = 1;
+    periph_clk.PLLSAI1.PLLSAI1N = 8;
+    periph_clk.PLLSAI1.PLLSAI1P = RCC_PLLP_DIV7;
+    periph_clk.PLLSAI1.PLLSAI1Q = RCC_PLLQ_DIV2;
+    periph_clk.PLLSAI1.PLLSAI1R = RCC_PLLR_DIV2;
+    periph_clk.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_ADC1CLK;
+
+    if (HAL_RCCEx_PeriphCLKConfig(&periph_clk) != HAL_OK)
+    {
+        low_power_adc_clock_restore_failure_count++;
+        return false;
+    }
+
+    __HAL_RCC_ADC_CLK_ENABLE();
+    low_power_adc_clock_restore_count++;
     return true;
 }
 
@@ -595,6 +631,17 @@ static bool LowPower_TryEnterStop2(uint32_t idle_budget_ms)
 
     /* STOP2 disables the PLL/HSE system clock; restore it before normal work. */
     SystemClock_Config();
+
+    /*
+     * ADC1 is clocked from PLLSAI1, which is not restored by
+     * SystemClock_Config(). Without this step HAL_ADC_Start() times out/fails
+     * after the first STOP2 cycle and battery telemetry remains at 0 mV.
+     */
+    if (!LowPower_RestoreAdcClock())
+    {
+        FaultManager_Raise(BOLUS_FAULT_BATTERY_MEASUREMENT);
+    }
+
     rtc_after_ms = LowPower_RtcTimeOfDayMs();
     LowPower_DisarmWakeup();
 
