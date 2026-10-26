@@ -34,6 +34,7 @@ typedef struct
     uint64_t inter_pulse_interval_sum_sq_ms2;
 
     bool temperature_valid;
+    uint16_t temperature_sample_count;
     int32_t temperature_current_mdeg_c;
     int32_t temperature_min_mdeg_c;
     int32_t temperature_max_mdeg_c;
