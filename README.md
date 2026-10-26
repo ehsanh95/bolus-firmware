@@ -67,6 +67,9 @@ On the `phase6/low-power-stop2` branch, the MCU enters STOP2 between application
 - V2: 32 bytes — legacy/frozen
 - V2.1: 42 bytes — legacy/frozen
 - V2.2: 38 bytes — legacy/frozen
-- V3: active variable-length summary + per-Episode digests, max 51 bytes per packet
+- V3: legacy variable-length summary + per-Episode digests, max 51 bytes per packet
+- V4: active hard-window telemetry; every window contains >=1 Episode, 16-byte Episode records, max 51 bytes per packet
 
-V3 sends a 15-minute summary plus as many closed Episode digests as fit in the packet; additional digests use continuation packets with the same window sequence. Step activity is transmitted as a per-window delta from the **BMA456**.
+V4 hard-closes any active Episode at the telemetry boundary, records a baseline Episode when the window is otherwise quiet, and restarts still-active sources with the CARRY flag in the next window. Each Episode carries motion features plus min/max/end temperature and a close reason. A V4 summary carries up to two Episodes; continuation packets carry two more each under the same sequence/packet-total contract. Step activity remains a per-window delta from the **BMA456**.
+
+V3 remains decoder-compatible for historical payloads.
