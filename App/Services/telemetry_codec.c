@@ -531,6 +531,9 @@ telemetry_codec_status_t TelemetryCodec_EncodeSummaryV3(
     uint8_t acquisition_profile,
     bool digest_overflow,
     uint16_t step_delta,
+    uint16_t window_duration_s,
+    uint8_t temperature_sample_count,
+    uint8_t dropped_episode_count,
     uint8_t suppressed_trigger_count,
     const bolus_event_digest_t *digests,
     uint8_t digest_count,
@@ -770,21 +773,11 @@ telemetry_codec_status_t TelemetryCodec_EncodeSummaryV4(
     payload[4] = status;
     payload[5] = acquisition_profile;
     WriteU16Le(&payload[6], v2->battery_mv);
-
-    if (v2->temperature_valid)
-    {
-        WriteI16Le(
-            &payload[8],
-            MdegCToCentiC(v2->temperature_current_mdeg_c));
-        WriteI16Le(
-            &payload[10],
-            MdegCToCentiC(v2->temperature_min_mdeg_c));
-        WriteI16Le(
-            &payload[12],
-            MdegCToCentiC(v2->temperature_max_mdeg_c));
-    }
-
-    WriteU16Le(&payload[14], step_delta);
+    WriteU16Le(&payload[8], step_delta);
+    WriteU16Le(&payload[10], v2->accepted_pulse_count);
+    WriteU16Le(&payload[12], window_duration_s);
+    payload[14] = temperature_sample_count;
+    payload[15] = dropped_episode_count;
     payload[16] = digest_count;
     payload[17] = packet_total;
     payload[18] = suppressed_trigger_count;
