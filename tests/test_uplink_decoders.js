@@ -45,7 +45,7 @@ const telemetryV3 = [
 
 const telemetryV4 = [
   0x61, 0x10, 0x00, 0x0B, 0x83, 0x03, 0xF8, 0x0C,
-  0x8D, 0x09, 0x8C, 0x09, 0x94, 0x09, 0x56, 0x00,
+  0x56, 0x00, 0x03, 0x00, 0x2C, 0x01, 0x06, 0x01,
   0x03, 0x02, 0x08,
   0x0A, 0x00, 0x0D, 0x03, 0x0C, 0x02, 0x8C, 0x9C,
   0x94, 0x14, 0x32, 0x19, 0x03, 0x2D, 0x03, 0x02,
@@ -121,8 +121,14 @@ for (const relativePath of decoderPaths) {
   assert.strictEqual(v4.data.version, 'V4');
   assert.strictEqual(v4.data.protocol.sequence, 0x0010);
   assert.strictEqual(v4.data.protocol.payload_size_bytes, 51);
+  assert.strictEqual(v4.data.activity.steps_delta, 86);
+  assert.strictEqual(v4.data.activity.accepted_pulse_count, 3);
+  assert.strictEqual(v4.data.activity.window_duration_s, 300);
+  assert.strictEqual(v4.data.activity.temperature_sample_count, 6);
+  assert.strictEqual(v4.data.activity.dropped_episode_count, 1);
   assert.strictEqual(v4.data.activity.episode_total, 3);
   assert.strictEqual(v4.data.activity.packet_total, 2);
+  assert.ok(!Object.prototype.hasOwnProperty.call(v4.data, 'temperature'));
   assert.strictEqual(v4.data.episodes.length, 2);
   assert.strictEqual(v4.data.episodes[0].temperature.min_c, 35);
   assert.strictEqual(v4.data.episodes[0].temperature.max_c, 39);
@@ -196,7 +202,13 @@ assert.strictEqual(configuratorV3.protocol.version_name, 'V3');
 assert.strictEqual(configuratorV3.episodes[0].pulse_count, 3);
 const configuratorV4 = configuratorContext.decodeTelemetry(telemetryV4);
 assert.strictEqual(configuratorV4.protocol.version_name, 'V4');
+assert.strictEqual(configuratorV4.activity.steps_delta, 86);
+assert.strictEqual(configuratorV4.activity.accepted_pulse_count, 3);
+assert.strictEqual(configuratorV4.activity.window_duration_s, 300);
+assert.strictEqual(configuratorV4.activity.temperature_sample_count, 6);
+assert.strictEqual(configuratorV4.activity.dropped_episode_count, 1);
 assert.strictEqual(configuratorV4.activity.episode_total, 3);
+assert.ok(!Object.prototype.hasOwnProperty.call(configuratorV4, 'temperature'));
 assert.strictEqual(configuratorV4.episodes[0].temperature.end_c, 37);
 assert.strictEqual(configuratorCompact.battery.voltage_mv, 3320);
 assert.ok(!Object.prototype.hasOwnProperty.call(configuratorCompact.battery, 'percent'));
