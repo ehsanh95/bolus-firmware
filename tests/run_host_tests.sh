@@ -10,6 +10,12 @@ flags=(-std=c11 -g -O1 -Wall -Wextra -Wno-misleading-indentation -fsanitize=unde
 "$cc" "${flags[@]}" tests/test_telemetry_codec_v2_2.c App/Services/telemetry_codec.c -o "$build_dir/codec"
 "$build_dir/codec"
 echo 'PASS: telemetry C encoder'
+
+"$cc" "${flags[@]}" -Itests/host     tests/test_telemetry_window.c     App/Services/telemetry_window_service.c     App/Config/bolus_runtime_config.c     -o "$build_dir/telemetry_window"
+"$build_dir/telemetry_window"
+
+"$cc" "${flags[@]}"     tests/test_event_digest.c     App/Services/event_digest_service.c     -o "$build_dir/event_digest"
+"$build_dir/event_digest"
 node tests/test_uplink_decoders.js
 node tests/test_downlink_configurator.js
 
