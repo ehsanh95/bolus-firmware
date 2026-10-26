@@ -376,6 +376,172 @@ function bolusDecodeTelemetryV3(bytes) {
   return { error: 'Unsupported Telemetry V3 message type: ' + messageType + '.' };
 }
 
+
+function bolusV4CloseReasonName(code) {
+  var names = {
+    0: 'UNSPECIFIED',
+    1: 'MOTION_QUIET',
+    2: 'TEMP_NORMAL',
+    3: 'TELEMETRY_BOUNDARY',
+    4: 'MAX_DURATION'
+  };
+  return names[code] || ('UNKNOWN_' + code);
+}
+
+function bolusDecodeV4Digest(bytes, offset) {
+  var flags = bytes[offset + 13];
+  var tempValid = !!(flags & 0x20);
+  return {
+    start_offset_s: bolusU16Le(bytes, offset),
+    duration_s: bytes[offset + 2] * 5,
+    pulse_count: bytes[offset + 3],
+    mean_inter_pulse_interval_s: bytes[offset + 4],
+    suppressed_trigger_count: bytes[offset + 5],
+    temperature: {
+      valid: tempValid,
+      min_c: tempValid ? bytes[offset + 6] / 4 : null,
+      max_c: tempValid ? bytes[offset + 7] / 4 : null,
+      end_c: tempValid ? bytes[offset + 8] / 4 : null
+    },
+    rms_dynamic_accel_mg: bytes[offset + 9] * 20,
+    peak_dynamic_accel_mg: bytes[offset + 10] * 20,
+    peak_angular_velocity_dps: bytes[offset + 11] * 10,
+    orientation_change_deg: bytes[offset + 12] * 2,
+    close_reason: {
+      code: bytes[offset + 14],
+      name: bolusV4CloseReasonName(bytes[offset + 14])
+    },
+    mpu_burst_count: bytes[offset + 15],
+    flags: {
+      raw: bolusHex(flags, 2),
+      motion: !!(flags & 0x01),
+      temperature_high: !!(flags & 0x02),
+      temperature_low: !!(flags & 0x04),
+      mpu_used: !!(flags & 0x08),
+      mpu_skipped_by_policy: !!(flags & 0x10),
+      temperature_valid: tempValid,
+      mpu_failed: !!(flags & 0x40),
+      carry_from_previous_window: !!(flags & 0x80)
+    }
+  };
+}
+
+function bolusDecodeTelemetryV4(bytes) {
+  if (!bytes || bytes.length < 7) {
+    return { error: 'Telemetry V4 payload is too short.' };
+  }
+
+  var version = (bytes[0] >> 4) & 0x0F;
+  var messageType = bytes[0] & 0x0F;
+  if (version !== 6) {
+    return { error: 'Unsupported Telemetry V4 wire version: ' + version + '.' };
+  }
+
+  if (messageType === 1) {
+    if (bytes.length < 19 || ((bytes.length - 19) % 16) !== 0) {
+      return { error: 'Telemetry V4 summary length is invalid.' };
+    }
+    var status = bytes[4];
+    var recordCount = (bytes.length - 19) / 16;
+    if (recordCount > 2) {
+      return { error: 'Telemetry V4 summary contains too many Episode records.' };
+    }
+    var episodeTotal = bytes[16];
+    var packetTotal = bytes[17];
+    if (episodeTotal < recordCount || packetTotal < 1) {
+      return { error: 'Telemetry V4 summary counters are invalid.' };
+    }
+    var episodes = [];
+    for (var i = 0; i < recordCount; i++) {
+      episodes.push(bolusDecodeV4Digest(bytes, 19 + (i * 16)));
+    }
+    return {
+      data: {
+        version: 'V4',
+        protocol: {
+          version: 6,
+          message_type: 1,
+          message_name: 'summary_v4',
+          payload_size_bytes: bytes.length,
+          sequence: bolusU16Le(bytes, 1),
+          runtime_config_version: bytes[3]
+        },
+        status: {
+          raw: bolusHex(status, 2),
+          temperature_valid: !!(status & 0x01),
+          motion_valid: !!(status & 0x02),
+          event_digest_overflow: !!(status & 0x04),
+          fault_present: !!(status & 0x10),
+          health_degraded: !!(status & 0x20),
+          health_critical: !!(status & 0x40),
+          continuation_expected: !!(status & 0x80)
+        },
+        acquisition_level: bytes[5] & 0x07,
+        custom_profile: !!(bytes[5] & 0x80),
+        battery: { voltage_mv: bolusU16Le(bytes, 6) },
+        temperature: {
+          current_c: bolusI16Le(bytes, 8) / 100,
+          min_c: bolusI16Le(bytes, 10) / 100,
+          max_c: bolusI16Le(bytes, 12) / 100
+        },
+        activity: {
+          steps_delta: bolusU16Le(bytes, 14),
+          episode_total: episodeTotal,
+          packet_total: packetTotal,
+          suppressed_trigger_count: bytes[18]
+        },
+        packet: {
+          packet_index: 0,
+          packet_total: packetTotal,
+          episode_total: episodeTotal
+        },
+        episodes: episodes
+      }
+    };
+  }
+
+  if (messageType === 2) {
+    if (bytes.length < 7 || ((bytes.length - 7) % 16) !== 0) {
+      return { error: 'Telemetry V4 continuation length is invalid.' };
+    }
+    var packetIndex = bytes[3];
+    var packetTotal = bytes[4];
+    var episodeTotal = bytes[5];
+    var declaredCount = bytes[6] & 0x7F;
+    var continuationCount = (bytes.length - 7) / 16;
+    if (declaredCount !== continuationCount || continuationCount > 2 ||
+        packetIndex === 0 || packetTotal < 2 || packetIndex >= packetTotal) {
+      return { error: 'Telemetry V4 continuation counters are invalid.' };
+    }
+    var continuedEpisodes = [];
+    for (var j = 0; j < continuationCount; j++) {
+      continuedEpisodes.push(bolusDecodeV4Digest(bytes, 7 + (j * 16)));
+    }
+    return {
+      data: {
+        version: 'V4',
+        protocol: {
+          version: 6,
+          message_type: 2,
+          message_name: 'episode_continuation_v4',
+          payload_size_bytes: bytes.length,
+          sequence: bolusU16Le(bytes, 1)
+        },
+        continuation: {
+          packet_index: packetIndex,
+          packet_total: packetTotal,
+          episode_total: episodeTotal,
+          more: !!(bytes[6] & 0x80),
+          episode_count: declaredCount
+        },
+        episodes: continuedEpisodes
+      }
+    };
+  }
+
+  return { error: 'Unsupported Telemetry V4 message type: ' + messageType + '.' };
+}
+
 function bolusDecodeTelemetry(bytes) {
   if (!bytes || bytes.length === 0) {
     return { error: 'Telemetry payload is empty.' };
@@ -393,6 +559,9 @@ function bolusDecodeTelemetry(bytes) {
   }
   if (version === 5) {
     return bolusDecodeTelemetryV3(bytes);
+  }
+  if (version === 6) {
+    return bolusDecodeTelemetryV4(bytes);
   }
   return { error: 'Unsupported telemetry version: ' + version + '.' };
 }
@@ -461,7 +630,7 @@ function bolusDecodeUplink(fPort, bytes) {
   if (fPort === 4) {
     return bolusDecodeControlUplink(bytes);
   }
-  return { error: 'Unsupported Bolus uplink FPort: ' + fPort + '. Expected FPort 2 (Telemetry V2/V2.1/V2.2) or FPort 4 (ACK/NACK).' };
+  return { error: 'Unsupported Bolus uplink FPort: ' + fPort + '. Expected FPort 2 (Telemetry V2/V2.1/V2.2/V3/V4) or FPort 4 (ACK/NACK).' };
 }
 
 // ChirpStack calls this function for every application uplink.
