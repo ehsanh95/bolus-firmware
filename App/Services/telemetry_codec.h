@@ -151,6 +151,9 @@ telemetry_codec_status_t TelemetryCodec_EncodeSummaryV3(
     uint8_t acquisition_profile,
     bool digest_overflow,
     uint16_t step_delta,
+    uint16_t window_duration_s,
+    uint8_t temperature_sample_count,
+    uint8_t dropped_episode_count,
     uint8_t suppressed_trigger_count,
     const bolus_event_digest_t *digests,
     uint8_t digest_count,
@@ -179,9 +182,12 @@ telemetry_codec_status_t TelemetryCodec_EncodeContinuationV3(
  *   4      status bitmap
  *   5      acquisition/custom profile
  *   6..7   battery mV
- *   8..13  current/min/max temperature, centi-C
- *   14..15 step delta
- *   16     total Episode count for this telemetry window
+ *   8..9   BMA456 step delta
+ *   10..11 accepted motion-pulse count in this window
+ *   12..13 window duration, seconds
+ *   14     temperature sample count, saturated to 255
+ *   15     dropped Episode count, saturated to 255
+ *   16     total transmitted Episode count for this telemetry window
  *   17     total packet count (summary + continuations)
  *   18     suppressed trigger count for the whole window
  *
