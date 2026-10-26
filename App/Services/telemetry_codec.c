@@ -637,3 +637,241 @@ telemetry_codec_status_t TelemetryCodec_EncodeContinuationV3(
     *more = (digest_count > count);
     return TELEMETRY_CODEC_OK;
 }
+
+static uint8_t QuantizeTempQuarterC(int16_t centi_c)
+{
+    int32_t value;
+
+    if (centi_c <= 0)
+    {
+        return 0U;
+    }
+
+    value = ((int32_t)centi_c + 12) / 25;
+    if (value > 254)
+    {
+        value = 254;
+    }
+
+    return (uint8_t)value;
+}
+
+static void EncodeV4Digest(const bolus_event_digest_t *digest, uint8_t *payload)
+{
+    uint32_t duration_units;
+
+    WriteU16Le(&payload[0], digest->start_offset_s);
+    duration_units = ((uint32_t)digest->duration_s + 2U) / 5U;
+    payload[2] = SaturateU8(duration_units);
+    payload[3] = digest->pulse_count;
+    payload[4] = digest->mean_inter_pulse_interval_s;
+    payload[5] = digest->suppressed_trigger_count;
+
+    if ((digest->flags & BOLUS_EVENT_DIGEST_FLAG_TEMP_VALID) != 0U)
+    {
+        payload[6] = QuantizeTempQuarterC(digest->temperature_min_centi_c);
+        payload[7] = QuantizeTempQuarterC(digest->temperature_max_centi_c);
+        payload[8] = QuantizeTempQuarterC(digest->temperature_end_centi_c);
+    }
+    else
+    {
+        payload[6] = 0xFFU;
+        payload[7] = 0xFFU;
+        payload[8] = 0xFFU;
+    }
+
+    payload[9] = QuantizeAccel20Mg(digest->rms_dynamic_accel_mg);
+    payload[10] = QuantizeAccel20Mg(digest->peak_dynamic_accel_mg);
+    payload[11] = QuantizeDps10(digest->peak_angular_velocity_dps);
+    payload[12] = QuantizeOrientation2Deg(digest->orientation_change_cdeg);
+    payload[13] = digest->flags;
+    payload[14] = digest->close_reason;
+    payload[15] = digest->mpu_burst_count;
+}
+
+uint8_t TelemetryCodec_V4PacketCount(uint8_t digest_count)
+{
+    uint8_t remaining;
+
+    if (digest_count <= BOLUS_TELEMETRY_V4_SUMMARY_DIGESTS)
+    {
+        return 1U;
+    }
+
+    remaining =
+        (uint8_t)(digest_count - BOLUS_TELEMETRY_V4_SUMMARY_DIGESTS);
+
+    return (uint8_t)(
+        1U +
+        ((remaining + BOLUS_TELEMETRY_V4_CONT_DIGESTS - 1U) /
+         BOLUS_TELEMETRY_V4_CONT_DIGESTS));
+}
+
+telemetry_codec_status_t TelemetryCodec_EncodeSummaryV4(
+    const bolus_telemetry_summary_v2_2_t *summary,
+    uint8_t acquisition_profile,
+    bool digest_overflow,
+    uint16_t step_delta,
+    uint8_t suppressed_trigger_count,
+    const bolus_event_digest_t *digests,
+    uint8_t digest_count,
+    uint8_t *payload,
+    size_t payload_capacity,
+    size_t *payload_size,
+    uint8_t *digests_consumed,
+    bool *more)
+{
+    const bolus_telemetry_summary_v2_t *v2;
+    uint8_t status = 0U;
+    uint8_t count;
+    uint8_t packet_total;
+    uint8_t i;
+    size_t needed;
+
+    if ((summary == NULL) || (payload == NULL) || (payload_size == NULL) ||
+        (digests_consumed == NULL) || (more == NULL) ||
+        ((digest_count > 0U) && (digests == NULL)))
+    {
+        return TELEMETRY_CODEC_ERROR_PARAM;
+    }
+
+    count =
+        (digest_count > BOLUS_TELEMETRY_V4_SUMMARY_DIGESTS) ?
+        BOLUS_TELEMETRY_V4_SUMMARY_DIGESTS : digest_count;
+    packet_total = TelemetryCodec_V4PacketCount(digest_count);
+    needed =
+        BOLUS_TELEMETRY_V4_HEADER_SIZE +
+        ((size_t)count * BOLUS_TELEMETRY_V4_DIGEST_SIZE);
+
+    *payload_size = 0U;
+
+    if ((needed > BOLUS_TELEMETRY_V4_MAX_PACKET_SIZE) ||
+        (payload_capacity < needed))
+    {
+        return TELEMETRY_CODEC_ERROR_BUFFER;
+    }
+
+    v2 = &summary->v2;
+    memset(payload, 0, needed);
+
+    if (v2->temperature_valid) status |= (1U << 0);
+    if (v2->motion_valid) status |= (1U << 1);
+    if (digest_overflow) status |= (1U << 2);
+    if (v2->fault_present) status |= (1U << 4);
+    if (v2->health_degraded) status |= (1U << 5);
+    if (v2->health_critical) status |= (1U << 6);
+    if (packet_total > 1U) status |= (1U << 7);
+
+    payload[0] = (uint8_t)(
+        ((BOLUS_TELEMETRY_PROTOCOL_VERSION_V4 & 0x0FU) << 4) |
+        BOLUS_TELEMETRY_MESSAGE_TYPE_SUMMARY);
+    WriteU16Le(&payload[1], v2->sequence);
+    payload[3] = SaturateU8(v2->config_version);
+    payload[4] = status;
+    payload[5] = acquisition_profile;
+    WriteU16Le(&payload[6], v2->battery_mv);
+
+    if (v2->temperature_valid)
+    {
+        WriteI16Le(
+            &payload[8],
+            MdegCToCentiC(v2->temperature_current_mdeg_c));
+        WriteI16Le(
+            &payload[10],
+            MdegCToCentiC(v2->temperature_min_mdeg_c));
+        WriteI16Le(
+            &payload[12],
+            MdegCToCentiC(v2->temperature_max_mdeg_c));
+    }
+
+    WriteU16Le(&payload[14], step_delta);
+    payload[16] = digest_count;
+    payload[17] = packet_total;
+    payload[18] = suppressed_trigger_count;
+
+    for (i = 0U; i < count; i++)
+    {
+        EncodeV4Digest(
+            &digests[i],
+            &payload[
+                BOLUS_TELEMETRY_V4_HEADER_SIZE +
+                ((size_t)i * BOLUS_TELEMETRY_V4_DIGEST_SIZE)]);
+    }
+
+    *payload_size = needed;
+    *digests_consumed = count;
+    *more = digest_count > count;
+    return TELEMETRY_CODEC_OK;
+}
+
+telemetry_codec_status_t TelemetryCodec_EncodeContinuationV4(
+    uint16_t sequence,
+    uint8_t packet_index,
+    uint8_t packet_total,
+    uint8_t episode_total,
+    const bolus_event_digest_t *digests,
+    uint8_t digest_count,
+    uint8_t *payload,
+    size_t payload_capacity,
+    size_t *payload_size,
+    uint8_t *digests_consumed,
+    bool *more)
+{
+    uint8_t count;
+    uint8_t i;
+    size_t needed;
+
+    if ((payload == NULL) || (payload_size == NULL) ||
+        (digests_consumed == NULL) || (more == NULL) ||
+        ((digest_count > 0U) && (digests == NULL)) ||
+        (packet_index == 0U) || (packet_total == 0U) ||
+        (packet_index >= packet_total))
+    {
+        return TELEMETRY_CODEC_ERROR_PARAM;
+    }
+
+    count =
+        (digest_count > BOLUS_TELEMETRY_V4_CONT_DIGESTS) ?
+        BOLUS_TELEMETRY_V4_CONT_DIGESTS : digest_count;
+    needed =
+        BOLUS_TELEMETRY_V4_CONT_HEADER_SIZE +
+        ((size_t)count * BOLUS_TELEMETRY_V4_DIGEST_SIZE);
+
+    *payload_size = 0U;
+
+    if ((needed > BOLUS_TELEMETRY_V4_MAX_PACKET_SIZE) ||
+        (payload_capacity < needed))
+    {
+        return TELEMETRY_CODEC_ERROR_BUFFER;
+    }
+
+    memset(payload, 0, needed);
+    payload[0] = (uint8_t)(
+        ((BOLUS_TELEMETRY_PROTOCOL_VERSION_V4 & 0x0FU) << 4) |
+        BOLUS_TELEMETRY_MESSAGE_TYPE_CONTINUATION);
+    WriteU16Le(&payload[1], sequence);
+    payload[3] = packet_index;
+    payload[4] = packet_total;
+    payload[5] = episode_total;
+    payload[6] = count;
+
+    if (digest_count > count)
+    {
+        payload[6] |= 0x80U;
+    }
+
+    for (i = 0U; i < count; i++)
+    {
+        EncodeV4Digest(
+            &digests[i],
+            &payload[
+                BOLUS_TELEMETRY_V4_CONT_HEADER_SIZE +
+                ((size_t)i * BOLUS_TELEMETRY_V4_DIGEST_SIZE)]);
+    }
+
+    *payload_size = needed;
+    *digests_consumed = count;
+    *more = digest_count > count;
+    return TELEMETRY_CODEC_OK;
+}
+
