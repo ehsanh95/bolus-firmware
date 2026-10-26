@@ -1390,16 +1390,16 @@ int main(void)
                 (uint8_t)telemetry_window_service.temperature_sample_count;
         }
 
-        telemetry_digest_overflow =
-            EventDigestService_ConsumeOverflow(&event_digest_service);
-        telemetry_dropped_episode_count =
-            EventDigestService_ConsumeDroppedCount(&event_digest_service);
-
         telemetry_frozen_digest_count =
             EventDigestService_SnapshotAndClear(
                 &event_digest_service,
                 telemetry_frozen_digests,
                 EVENT_DIGEST_CAPACITY);
+
+        telemetry_digest_overflow =
+            EventDigestService_ConsumeOverflow(&event_digest_service);
+        telemetry_dropped_episode_count =
+            EventDigestService_ConsumeDroppedCount(&event_digest_service);
         telemetry_frozen_digest_offset = 0U;
         telemetry_v4_continuation_index = 1U;
         telemetry_v4_packet_total =
