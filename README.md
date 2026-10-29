@@ -68,7 +68,7 @@ On the `phase6/low-power-stop2` branch, the MCU enters STOP2 between application
 - V2.1: 42 bytes — legacy/frozen
 - V2.2: 38 bytes — legacy/frozen
 - V3: legacy variable-length summary + per-Episode digests, max 51 bytes per packet
-- V4: active hard-window telemetry; every window contains >=1 Episode, 16-byte Episode records, max 51 bytes per packet
+- V4/V4.1: active hard-window telemetry; every window contains >=1 Episode, 16-byte Episode records, max 51 bytes per packet; current wire revision uses 0.1 °C Episode temperature resolution with an 18.0 °C offset
 
 V4 hard-closes any active Episode at the telemetry boundary, records a baseline Episode when the window is otherwise quiet, and restarts still-active sources with the CARRY flag in the next window. Each Episode carries motion features plus min/max/end temperature and a close reason. Window temperature current/min/max are intentionally not duplicated in the V4 header; those values are reconstructed from Episode records. The reclaimed header bytes carry step delta, accepted motion-pulse count, window duration, temperature-sample count, dropped-Episode count, total Episode count, packet count, and suppressed-trigger count. A V4 summary carries up to two Episodes; continuation packets carry two more each under the same sequence/packet-total contract.
 
