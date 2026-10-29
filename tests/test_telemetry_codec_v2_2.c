@@ -148,7 +148,7 @@ int main(void)
         assert(payload_size == BOLUS_TELEMETRY_V4_MAX_PACKET_SIZE);
         assert(consumed == 2U);
         assert(more);
-        assert(payload[0] == 0x61U);
+        assert(payload[0] == 0x71U);
         assert(payload[1] == 0x10U && payload[2] == 0x00U);
         assert(payload[4] == 0x83U);
         assert(payload[8] == 86U && payload[9] == 0U);
@@ -165,9 +165,9 @@ int main(void)
         assert(payload[22] == 3U);
         assert(payload[23] == 12U);
         assert(payload[24] == 2U);
-        assert(payload[25] == 140U);
-        assert(payload[26] == 156U);
-        assert(payload[27] == 148U);
+        assert(payload[25] == 170U);
+        assert(payload[26] == 210U);
+        assert(payload[27] == 190U);
         assert(payload[28] == 20U);
         assert(payload[29] == 50U);
         assert(payload[30] == 25U);
@@ -191,7 +191,7 @@ int main(void)
         assert(payload_size == 23U);
         assert(consumed == 1U);
         assert(!more);
-        assert(payload[0] == 0x62U);
+        assert(payload[0] == 0x72U);
         assert(payload[3] == 1U);
         assert(payload[4] == 2U);
         assert(payload[5] == 3U);
