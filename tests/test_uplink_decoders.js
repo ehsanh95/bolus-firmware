@@ -59,6 +59,22 @@ const telemetryV4Continuation = [
   0x94, 0x14, 0x32, 0x19, 0x03, 0xAD, 0x03, 0x02
 ];
 
+const telemetryV4_1 = [
+  0x71, 0x10, 0x00, 0x0B, 0x83, 0x03, 0xF8, 0x0C,
+  0x56, 0x00, 0x03, 0x00, 0x2C, 0x01, 0x06, 0x01,
+  0x03, 0x02, 0x08,
+  0x0A, 0x00, 0x0D, 0x03, 0x0C, 0x02, 0xAA, 0xD2,
+  0xBE, 0x14, 0x32, 0x19, 0x03, 0x2D, 0x03, 0x02,
+  0x64, 0x00, 0x0D, 0x00, 0x0C, 0x02, 0xAA, 0xD2,
+  0xBE, 0x14, 0x32, 0x19, 0x03, 0x20, 0x02, 0x02
+];
+
+const telemetryV4_1Continuation = [
+  0x72, 0x10, 0x00, 0x01, 0x02, 0x03, 0x01,
+  0xDC, 0x00, 0x0D, 0x03, 0x0C, 0x02, 0xAA, 0xD2,
+  0xBE, 0x14, 0x32, 0x19, 0x03, 0xAD, 0x03, 0x02
+];
+
 for (const relativePath of decoderPaths) {
   const context = vm.createContext({});
   const source = fs.readFileSync(path.join(repositoryRoot, relativePath), 'utf8');
@@ -130,6 +146,8 @@ for (const relativePath of decoderPaths) {
   assert.strictEqual(v4.data.activity.packet_total, 2);
   assert.ok(!Object.prototype.hasOwnProperty.call(v4.data, 'temperature'));
   assert.strictEqual(v4.data.episodes.length, 2);
+  assert.strictEqual(v4.data.protocol.version, 6);
+  assert.strictEqual(v4.data.episodes[0].temperature.resolution_c, 0.25);
   assert.strictEqual(v4.data.episodes[0].temperature.min_c, 35);
   assert.strictEqual(v4.data.episodes[0].temperature.max_c, 39);
   assert.strictEqual(v4.data.episodes[0].temperature.end_c, 37);
@@ -143,6 +161,22 @@ for (const relativePath of decoderPaths) {
   assert.strictEqual(v4c.data.continuation.packet_total, 2);
   assert.strictEqual(v4c.data.continuation.episode_total, 3);
   assert.strictEqual(v4c.data.episodes[0].flags.carry_from_previous_window, true);
+
+  const v41 = context.decodeUplink({ fPort: 2, bytes: telemetryV4_1 });
+  assert.strictEqual(v41.data.version, 'V4.1');
+  assert.strictEqual(v41.data.protocol.version, 7);
+  assert.strictEqual(v41.data.protocol.message_name, 'summary_v4_1');
+  assert.strictEqual(v41.data.episodes[0].temperature.resolution_c, 0.1);
+  assert.strictEqual(v41.data.episodes[0].temperature.min_c, 35);
+  assert.strictEqual(v41.data.episodes[0].temperature.max_c, 39);
+  assert.strictEqual(v41.data.episodes[0].temperature.end_c, 37);
+
+  const v41c = context.decodeUplink({ fPort: 2, bytes: telemetryV4_1Continuation });
+  assert.strictEqual(v41c.data.version, 'V4.1');
+  assert.strictEqual(v41c.data.protocol.version, 7);
+  assert.strictEqual(v41c.data.continuation.packet_index, 1);
+  assert.strictEqual(v41c.data.episodes[0].temperature.resolution_c, 0.1);
+  assert.strictEqual(v41c.data.episodes[0].flags.carry_from_previous_window, true);
 
   const modernAck = context.decodeUplink({ fPort: 4, bytes: [0xD2,0x01,0x33,0x00,0x75,0x00,0x0C,0x00] });
   assert.ok(modernAck.data.apply_mask.pending_subsystems.includes('TMP_SENSOR'));
@@ -210,8 +244,13 @@ assert.strictEqual(configuratorV4.activity.dropped_episode_count, 1);
 assert.strictEqual(configuratorV4.activity.episode_total, 3);
 assert.ok(!Object.prototype.hasOwnProperty.call(configuratorV4, 'temperature'));
 assert.strictEqual(configuratorV4.episodes[0].temperature.end_c, 37);
+const configuratorV41 = configuratorContext.decodeTelemetry(telemetryV4_1);
+assert.strictEqual(configuratorV41.protocol.version_name, 'V4.1');
+assert.strictEqual(configuratorV41.protocol.version, 7);
+assert.strictEqual(configuratorV41.episodes[0].temperature.resolution_c, 0.1);
+assert.strictEqual(configuratorV41.episodes[0].temperature.end_c, 37);
 assert.strictEqual(configuratorCompact.battery.voltage_mv, 3320);
 assert.ok(!Object.prototype.hasOwnProperty.call(configuratorCompact.battery, 'percent'));
 assert.ok(!Object.prototype.hasOwnProperty.call(configuratorCompact.temperature, 'current_centi_c'));
 
-console.log('Telemetry V2/V2.1/V2.2/V3/V4 decoder vectors passed.');
+console.log('Telemetry V2/V2.1/V2.2/V3/V4/V4.1 decoder vectors passed.');
