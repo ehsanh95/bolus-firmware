@@ -638,16 +638,19 @@ telemetry_codec_status_t TelemetryCodec_EncodeContinuationV3(
     return TELEMETRY_CODEC_OK;
 }
 
-static uint8_t QuantizeTempQuarterC(int16_t centi_c)
+static uint8_t QuantizeTempDeciCOffset(int16_t centi_c)
 {
+    const int32_t offset_centi_c = 1800;
+    int32_t shifted;
     int32_t value;
 
-    if (centi_c <= 0)
+    shifted = (int32_t)centi_c - offset_centi_c;
+    if (shifted <= 0)
     {
         return 0U;
     }
 
-    value = ((int32_t)centi_c + 12) / 25;
+    value = (shifted + 5) / 10;
     if (value > 254)
     {
         value = 254;
@@ -669,9 +672,9 @@ static void EncodeV4Digest(const bolus_event_digest_t *digest, uint8_t *payload)
 
     if ((digest->flags & BOLUS_EVENT_DIGEST_FLAG_TEMP_VALID) != 0U)
     {
-        payload[6] = QuantizeTempQuarterC(digest->temperature_min_centi_c);
-        payload[7] = QuantizeTempQuarterC(digest->temperature_max_centi_c);
-        payload[8] = QuantizeTempQuarterC(digest->temperature_end_centi_c);
+        payload[6] = QuantizeTempDeciCOffset(digest->temperature_min_centi_c);
+        payload[7] = QuantizeTempDeciCOffset(digest->temperature_max_centi_c);
+        payload[8] = QuantizeTempDeciCOffset(digest->temperature_end_centi_c);
     }
     else
     {
