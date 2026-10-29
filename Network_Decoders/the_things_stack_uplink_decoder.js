@@ -469,11 +469,11 @@ function bolusDecodeTelemetryV4(bytes) {
     }
     return {
       data: {
-        version: 'V4',
+        version: version === 7 ? 'V4.1' : 'V4',
         protocol: {
           version: version,
           message_type: 1,
-          message_name: 'summary_v4',
+          message_name: version === 7 ? 'summary_v4_1' : 'summary_v4',
           payload_size_bytes: bytes.length,
           sequence: bolusU16Le(bytes, 1),
           runtime_config_version: bytes[3]
@@ -530,11 +530,11 @@ function bolusDecodeTelemetryV4(bytes) {
     }
     return {
       data: {
-        version: 'V4',
+        version: version === 7 ? 'V4.1' : 'V4',
         protocol: {
           version: version,
           message_type: 2,
-          message_name: 'episode_continuation_v4',
+          message_name: version === 7 ? 'episode_continuation_v4_1' : 'episode_continuation_v4',
           payload_size_bytes: bytes.length,
           sequence: bolusU16Le(bytes, 1)
         },
