@@ -174,7 +174,7 @@ telemetry_codec_status_t TelemetryCodec_EncodeContinuationV3(
 
 /*
  * V4 summary header (19 bytes):
- *   0      version/type = 0x61
+ *   0      version/type = 0x71 (current); legacy experimental V4 used 0x61
  *   1..2   telemetry sequence
  *   3      runtime config version
  *   4      status bitmap
