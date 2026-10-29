@@ -11,7 +11,8 @@
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V2_1     3U
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V2_2     4U
 #define BOLUS_TELEMETRY_PROTOCOL_VERSION_V3       5U
-#define BOLUS_TELEMETRY_PROTOCOL_VERSION_V4       6U
+#define BOLUS_TELEMETRY_PROTOCOL_VERSION_V4_LEGACY 6U
+#define BOLUS_TELEMETRY_PROTOCOL_VERSION_V4         7U
 #define BOLUS_TELEMETRY_MESSAGE_TYPE_SUMMARY      1U
 #define BOLUS_TELEMETRY_MESSAGE_TYPE_CONTINUATION 2U
 #define BOLUS_TELEMETRY_SUMMARY_V1_SIZE           24U
@@ -194,9 +195,9 @@ telemetry_codec_status_t TelemetryCodec_EncodeContinuationV3(
  *   3      accepted pulse count
  *   4      mean inter-pulse interval, seconds
  *   5      suppressed trigger count
- *   6      min temperature / 0.25 C
- *   7      max temperature / 0.25 C
- *   8      end temperature / 0.25 C
+ *   6      min temperature: 18.0 C offset, 0.1 C/LSB (0..254), 0xFF invalid
+ *   7      max temperature: 18.0 C offset, 0.1 C/LSB (0..254), 0xFF invalid
+ *   8      end temperature: 18.0 C offset, 0.1 C/LSB (0..254), 0xFF invalid
  *   9      RMS dynamic acceleration / 20 mg
  *   10     peak dynamic acceleration / 20 mg
  *   11     peak angular velocity / 10 dps
