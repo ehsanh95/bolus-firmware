@@ -388,7 +388,20 @@ function bolusV4CloseReasonName(code) {
   return names[code] || ('UNKNOWN_' + code);
 }
 
-function bolusDecodeV4Digest(bytes, offset) {
+function bolusDecodeV4Temperature(raw, wireVersion) {
+  if (raw === 0xFF) {
+    return null;
+  }
+  if (wireVersion === 6) {
+    return raw / 4;
+  }
+  if (wireVersion === 7) {
+    return 18.0 + (raw / 10);
+  }
+  return null;
+}
+
+function bolusDecodeV4Digest(bytes, offset, wireVersion) {
   var flags = bytes[offset + 13];
   var tempValid = !!(flags & 0x20);
   return {
@@ -399,9 +412,10 @@ function bolusDecodeV4Digest(bytes, offset) {
     suppressed_trigger_count: bytes[offset + 5],
     temperature: {
       valid: tempValid,
-      min_c: tempValid ? bytes[offset + 6] / 4 : null,
-      max_c: tempValid ? bytes[offset + 7] / 4 : null,
-      end_c: tempValid ? bytes[offset + 8] / 4 : null
+      resolution_c: wireVersion === 7 ? 0.1 : 0.25,
+      min_c: tempValid ? bolusDecodeV4Temperature(bytes[offset + 6], wireVersion) : null,
+      max_c: tempValid ? bolusDecodeV4Temperature(bytes[offset + 7], wireVersion) : null,
+      end_c: tempValid ? bolusDecodeV4Temperature(bytes[offset + 8], wireVersion) : null
     },
     rms_dynamic_accel_mg: bytes[offset + 9] * 20,
     peak_dynamic_accel_mg: bytes[offset + 10] * 20,
@@ -433,7 +447,7 @@ function bolusDecodeTelemetryV4(bytes) {
 
   var version = (bytes[0] >> 4) & 0x0F;
   var messageType = bytes[0] & 0x0F;
-  if (version !== 6) {
+  if ((version !== 6) && (version !== 7)) {
     return { error: 'Unsupported Telemetry V4 wire version: ' + version + '.' };
   }
 
@@ -453,13 +467,13 @@ function bolusDecodeTelemetryV4(bytes) {
     }
     var episodes = [];
     for (var i = 0; i < recordCount; i++) {
-      episodes.push(bolusDecodeV4Digest(bytes, 19 + (i * 16)));
+      episodes.push(bolusDecodeV4Digest(bytes, 19 + (i * 16), version));
     }
     return {
       data: {
         version: 'V4',
         protocol: {
-          version: 6,
+          version: version,
           message_type: 1,
           message_name: 'summary_v4',
           payload_size_bytes: bytes.length,
@@ -514,13 +528,13 @@ function bolusDecodeTelemetryV4(bytes) {
     }
     var continuedEpisodes = [];
     for (var j = 0; j < continuationCount; j++) {
-      continuedEpisodes.push(bolusDecodeV4Digest(bytes, 7 + (j * 16)));
+      continuedEpisodes.push(bolusDecodeV4Digest(bytes, 7 + (j * 16), version));
     }
     return {
       data: {
         version: 'V4',
         protocol: {
-          version: 6,
+          version: version,
           message_type: 2,
           message_name: 'episode_continuation_v4',
           payload_size_bytes: bytes.length,
@@ -559,7 +573,7 @@ function bolusDecodeTelemetry(bytes) {
   if (version === 5) {
     return bolusDecodeTelemetryV3(bytes);
   }
-  if (version === 6) {
+  if ((version === 6) || (version === 7)) {
     return bolusDecodeTelemetryV4(bytes);
   }
   return { error: 'Unsupported telemetry version: ' + version + '.' };
