@@ -237,6 +237,7 @@ volatile uint32_t low_power_early_wake_count = 0U;
 volatile uint32_t low_power_last_sleep_ms = 0U;
 volatile uint32_t low_power_total_sleep_ms = 0U;
 volatile uint32_t low_power_reject_busy_count = 0U;
+volatile uint32_t low_power_reject_unprotected_stop_count = 0U;
 volatile uint32_t low_power_adc_clock_restore_count = 0U;
 volatile uint32_t low_power_adc_clock_restore_failure_count = 0U;
 static volatile bool s_low_power_rtc_irq_seen = false;
@@ -542,6 +543,14 @@ static uint32_t LowPower_ComputeIdleBudget(uint32_t now_ms)
 
 static bool LowPower_CanEnterStop2(void)
 {
+    /* With IWDG frozen in STOP, a failed RTC wake can leave the device asleep
+     * indefinitely until a motion IRQ. Stay awake if this option byte is not
+     * programmed to keep the hardware watchdog running in STOP2. */
+    if ((FLASH->OPTR & FLASH_OPTR_IWDG_STOP) == 0U)
+    {
+        low_power_reject_unprotected_stop_count++;
+        return false;
+    }
 #if (BOLUS_BENCH_LED_DIAGNOSTICS != 0)
     /* Non-blocking bench pattern display lasts <=620 ms in the main loop.
      * Production builds and radio-critical intervals are unaffected. */

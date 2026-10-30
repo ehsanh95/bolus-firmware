@@ -78,6 +78,13 @@ typedef struct
     uint32_t duty_cycle_defer_count;
     uint32_t mac_busy_defer_count;
     uint32_t nvm_change_count;
+    uint32_t fcnt_reserved_high;
+    uint32_t fcnt_restore_count;
+    uint32_t fcnt_reservation_count;
+    uint32_t fcnt_storage_failure_count;
+    uint32_t mac_stall_count;
+    uint32_t mac_stall_recovery_count;
+    uint32_t mac_recovery_reset_count;
 
     uint32_t last_sequence_submitted;
     uint32_t last_sequence_completed;
