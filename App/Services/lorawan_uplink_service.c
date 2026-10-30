@@ -5,6 +5,9 @@
 #include "fault_manager.h"
 #include "main.h"
 #include "rfm95w_board.h"
+#include "fcnt_journal.h"
+#include "flash_fcnt_storage.h"
+#include "LoRaMacCrypto.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -23,6 +26,10 @@
 
 #define LORAWAN_UPLINK_BUSY_RETRY_MS       100UL
 #define LORAWAN_UPLINK_TX_WATCHDOG_MS      15000UL
+#define LORAWAN_MAC_STALL_LIMIT_MS         60000UL
+#define LORAWAN_MAC_RECOVERY_BACKOFF_MS     2000UL
+#define LORAWAN_MAC_MAX_SOFT_RECOVERIES       3U
+#define LORAWAN_RESET_BKP_MAGIC          0xB0550000UL
 #define LORAWAN_ABP_LRWAN_VERSION_V103     0x01000300UL
 
 typedef struct
@@ -82,6 +89,11 @@ static uint8_t s_app_s_key[16] = BOLUS_LORAWAN_APP_S_KEY_BYTES;
  */
 static LoRaMacPrimitives_t s_mac_primitives;
 static LoRaMacCallback_t s_mac_callbacks;
+static fcnt_journal_t s_fcnt_journal;
+static bool s_fcnt_ready = false;
+static bool s_mac_stall_active = false;
+static uint32_t s_mac_stall_started_ms = 0U;
+static uint8_t s_mac_recoveries_without_success = 0U;
 
 lorawan_uplink_diag_t lorawan_uplink_service_diag = {0};
 
@@ -89,6 +101,81 @@ static bool ApplyRadioMib(void);
 static bool ConfigureMacPolicy(void);
 static bool ConfigureAbpSession(void);
 static bool ActivateAbpSession(void);
+static void RecoverStalledMac(uint32_t now_ms);
+static void ControlledMacReset(void);
+
+static void ClearMacStall(void)
+{
+    s_mac_stall_active = false;
+}
+
+static void NoteMacStall(uint32_t now_ms)
+{
+    if (!s_mac_stall_active)
+    {
+        s_mac_stall_active = true;
+        s_mac_stall_started_ms = now_ms;
+    }
+}
+
+static bool ReserveNextUplinkCounter(void)
+{
+    uint32_t next_up;
+    uint32_t previous_high;
+
+    if (!s_fcnt_ready ||
+        LoRaMacCryptoGetFCntUp(&next_up) != LORAMAC_CRYPTO_SUCCESS)
+        goto failure;
+
+    previous_high = s_fcnt_journal.reserved_high;
+    if (!FcntJournal_EnsureReserved(&s_fcnt_journal, next_up))
+        goto failure;
+
+    if (s_fcnt_journal.reserved_high != previous_high)
+        lorawan_uplink_service_diag.fcnt_reservation_count++;
+    lorawan_uplink_service_diag.fcnt_reserved_high =
+        s_fcnt_journal.reserved_high;
+    return true;
+
+failure:
+    /* NEVER transmit an uplink when the monotonic counter cannot be proven. */
+    lorawan_uplink_service_diag.fcnt_storage_failure_count++;
+    lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
+    s_joined = false;
+    lorawan_uplink_service_diag.joined = false;
+    FaultManager_Raise(BOLUS_FAULT_RF_COMM);
+    return false;
+}
+
+static bool RestoreUplinkCounter(void)
+{
+    fcnt_journal_storage_t storage;
+    MibRequestConfirm_t contexts;
+    uint32_t current_counter;
+
+    if (!FlashFcntStorage_Create(&storage) ||
+        !FcntJournal_Init(&s_fcnt_journal, &storage, BOLUS_LORAWAN_DEV_ADDR))
+        return false;
+
+    memset(&contexts, 0, sizeof(contexts));
+    contexts.Type = MIB_NVM_CTXS;
+    if (LoRaMacMibGetRequestConfirm(&contexts) != LORAMAC_STATUS_OK ||
+        contexts.Param.Contexts == NULL)
+        return false;
+
+    current_counter = contexts.Param.Contexts->Crypto.FCntList.FCntUp;
+    if (s_fcnt_journal.reserved_high > current_counter)
+    {
+        contexts.Param.Contexts->Crypto.FCntList.FCntUp =
+            s_fcnt_journal.reserved_high;
+        lorawan_uplink_service_diag.fcnt_restore_count++;
+    }
+
+    s_fcnt_ready = true;
+    lorawan_uplink_service_diag.fcnt_reserved_high =
+        s_fcnt_journal.reserved_high;
+    return true;
+}
 
 static bool TimeReached(uint32_t now_ms, uint32_t deadline_ms)
 {
@@ -184,6 +271,7 @@ static void MacProcessNotify(void)
 
 static void MarkAbpSessionLost(uint32_t now_ms)
 {
+    NoteMacStall(now_ms);
     s_joined = false;
     lorawan_uplink_service_diag.joined = false;
     lorawan_uplink_service_diag.abp_session_configured = false;
@@ -244,6 +332,13 @@ static void MacMcpsConfirm(McpsConfirm_t *confirm)
     lorawan_uplink_service_diag.last_mcps_confirm_status = confirm->Status;
     lorawan_uplink_service_diag.last_uplink_counter = confirm->UpLinkCounter;
     lorawan_uplink_service_diag.last_tx_air_time_ms = confirm->TxTimeOnAir;
+
+    if (confirm->Status == LORAMAC_EVENT_INFO_STATUS_OK)
+    {
+        s_mac_recoveries_without_success = 0U;
+        RTC->BKP0R = LORAWAN_RESET_BKP_MAGIC;
+        ClearMacStall();
+    }
 
     if (completed_kind == LORAWAN_TX_KIND_CONTROL_RESPONSE)
     {
@@ -347,6 +442,13 @@ static void RecoverTimedOutTx(void)
 
     lorawan_uplink_service_diag.tx_watchdog_timeout_count++;
     FaultManager_Raise(BOLUS_FAULT_RF_TX_TIMEOUT);
+    ClearMacStall();
+
+    if (++s_mac_recoveries_without_success >= LORAWAN_MAC_MAX_SOFT_RECOVERIES)
+    {
+        ControlledMacReset();
+        return;
+    }
 
     /* This vendored LoRaMacStart() forces LORAMAC_IDLE, allowing the public
      * de-initializer to stop all MAC/radio timers and reset request counters.
@@ -385,6 +487,7 @@ static void RecoverTimedOutTx(void)
         lorawan_uplink_service_diag.tx_watchdog_recovery_failure_count++;
         lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
         FaultManager_Raise(BOLUS_FAULT_RF_COMM);
+        ControlledMacReset();
         return;
     }
 
@@ -400,6 +503,69 @@ static void RecoverTimedOutTx(void)
     /* A synthesized timeout has no new radio metadata to publish. */
     lorawan_uplink_service_diag.last_uplink_counter = last_uplink_counter;
     lorawan_uplink_service_diag.last_tx_air_time_ms = last_tx_air_time_ms;
+}
+
+static void ControlledMacReset(void)
+{
+    uint32_t attempts = RTC->BKP0R;
+    if ((attempts & 0xFFFF0000UL) != LORAWAN_RESET_BKP_MAGIC)
+        attempts = 0U;
+    else
+        attempts &= 0xFFFFU;
+
+    if (attempts >= LORAWAN_MAC_MAX_SOFT_RECOVERIES)
+    {
+        /* Three consecutive boot cycles without a successful MCPS confirm:
+         * remain faulted until service, rather than reboot forever. */
+        s_joined = false;
+        lorawan_uplink_service_diag.joined = false;
+        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
+        return;
+    }
+
+    RTC->BKP0R = LORAWAN_RESET_BKP_MAGIC | (attempts + 1U);
+    RTC->BKP1R = 0x4D414353UL; /* 'MACS': software reset due to stuck MAC */
+    lorawan_uplink_service_diag.mac_recovery_reset_count++;
+    NVIC_SystemReset();
+}
+
+static void RecoverStalledMac(uint32_t now_ms)
+{
+    LoRaMacStatus_t status;
+    ClearMacStall();
+    lorawan_uplink_service_diag.mac_stall_count++;
+    FaultManager_Raise(BOLUS_FAULT_RF_COMM);
+
+    if (s_mac_recoveries_without_success >= LORAWAN_MAC_MAX_SOFT_RECOVERIES)
+    {
+        ControlledMacReset();
+        return;
+    }
+
+    s_mac_recoveries_without_success++;
+    status = LoRaMacStart(); /* Force MAC out of a stuck busy state. */
+    if (status == LORAMAC_STATUS_OK)
+        status = LoRaMacDeInitialization();
+
+    lorawan_uplink_service_diag.last_mac_status = status;
+    if (status == LORAMAC_STATUS_OK &&
+        ConfigureMacPolicy() && ApplyRadioMib() && ConfigureAbpSession())
+    {
+        status = LoRaMacStart();
+        lorawan_uplink_service_diag.last_mac_status = status;
+        if (status == LORAMAC_STATUS_OK && ActivateAbpSession())
+        {
+            ClearTxInFlight();
+            lorawan_uplink_service_diag.mac_stall_recovery_count++;
+            s_next_action_tick_ms = now_ms + LORAWAN_MAC_RECOVERY_BACKOFF_MS;
+            lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
+            return;
+        }
+    }
+
+    /* A failed recovery must not strand the service in ERROR forever. Give
+     * the MCU a chance to reinitialize the radio, with a persistent cap. */
+    ControlledMacReset();
 }
 
 static void MacMcpsIndication(McpsIndication_t *indication, LoRaMacRxStatus_t *rx_status)
@@ -748,12 +914,16 @@ static void TrySendControlResponse(uint32_t now_ms)
     request.Req.Unconfirmed.fBufferSize = s_control_response_size;
     request.Req.Unconfirmed.Datarate = s_requested_datarate;
 
+    if (!ReserveNextUplinkCounter())
+        return;
+
     /* Keep duty-cycle waiting in this service instead of hiding it in LoRaMAC. */
     status = LoRaMacMcpsRequest(&request, false);
     lorawan_uplink_service_diag.last_mac_status = status;
 
     if (status == LORAMAC_STATUS_OK)
     {
+        ClearMacStall();
         s_control_response_attempts++;
         s_tx_in_flight = true;
         s_tx_kind = LORAWAN_TX_KIND_CONTROL_RESPONSE;
@@ -763,6 +933,7 @@ static void TrySendControlResponse(uint32_t now_ms)
     }
     else if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED)
     {
+        ClearMacStall();
         s_next_action_tick_ms = now_ms + request.ReqReturn.DutyCycleWaitTime;
         lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
         lorawan_uplink_service_diag.duty_cycle_defer_count++;
@@ -770,6 +941,7 @@ static void TrySendControlResponse(uint32_t now_ms)
     }
     else if (status == LORAMAC_STATUS_BUSY)
     {
+        NoteMacStall(now_ms);
         s_next_action_tick_ms = now_ms + LORAWAN_UPLINK_BUSY_RETRY_MS;
         lorawan_uplink_service_diag.next_action_tick_ms = s_next_action_tick_ms;
         lorawan_uplink_service_diag.mac_busy_defer_count++;
@@ -781,6 +953,7 @@ static void TrySendControlResponse(uint32_t now_ms)
     }
     else
     {
+        NoteMacStall(now_ms);
         /*
          * Count hard request failures as attempts too. Without this, a
          * persistent non-BUSY/non-duty-cycle error retries forever because the
@@ -824,11 +997,15 @@ static void TrySendMacCommandsOnly(uint32_t now_ms)
     request.Req.Unconfirmed.fBufferSize = 0U;
     request.Req.Unconfirmed.Datarate = s_requested_datarate;
 
+    if (!ReserveNextUplinkCounter())
+        return;
+
     status = LoRaMacMcpsRequest(&request, false);
     lorawan_uplink_service_diag.last_mac_status = status;
 
     if (status == LORAMAC_STATUS_OK)
     {
+        ClearMacStall();
         s_mac_flush_attempts++;
         s_tx_in_flight = true;
         s_tx_kind = LORAWAN_TX_KIND_MAC_FLUSH;
@@ -840,6 +1017,7 @@ static void TrySendMacCommandsOnly(uint32_t now_ms)
     }
     else if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED)
     {
+        ClearMacStall();
         s_next_action_tick_ms =
             now_ms + request.ReqReturn.DutyCycleWaitTime;
         lorawan_uplink_service_diag.next_action_tick_ms =
@@ -850,6 +1028,7 @@ static void TrySendMacCommandsOnly(uint32_t now_ms)
     }
     else if (status == LORAMAC_STATUS_BUSY)
     {
+        NoteMacStall(now_ms);
         s_next_action_tick_ms =
             now_ms + LORAWAN_UPLINK_BUSY_RETRY_MS;
         lorawan_uplink_service_diag.next_action_tick_ms =
@@ -864,6 +1043,7 @@ static void TrySendMacCommandsOnly(uint32_t now_ms)
     }
     else
     {
+        NoteMacStall(now_ms);
         s_mac_flush_attempts++;
         lorawan_uplink_service_diag.tx_failure_count++;
         if (s_mac_flush_attempts < s_max_tx_attempts)
@@ -931,6 +1111,7 @@ static void TrySendHead(uint32_t now_ms)
     }
     else if (status == LORAMAC_STATUS_BUSY)
     {
+        NoteMacStall(now_ms);
         s_next_action_tick_ms = now_ms + LORAWAN_UPLINK_BUSY_RETRY_MS;
         lorawan_uplink_service_diag.next_action_tick_ms =
             s_next_action_tick_ms;
@@ -941,6 +1122,7 @@ static void TrySendHead(uint32_t now_ms)
     }
     else if (status != LORAMAC_STATUS_OK)
     {
+        NoteMacStall(now_ms);
         lorawan_uplink_service_diag.tx_failure_count++;
         s_next_action_tick_ms = now_ms + s_retry_delay_ms;
         lorawan_uplink_service_diag.next_action_tick_ms =
@@ -966,11 +1148,15 @@ static void TrySendHead(uint32_t now_ms)
     request.Req.Unconfirmed.Datarate = s_requested_datarate;
 #endif
 
+    if (!ReserveNextUplinkCounter())
+        return;
+
     status = LoRaMacMcpsRequest(&request, false);
     lorawan_uplink_service_diag.last_mac_status = status;
 
     if (status == LORAMAC_STATUS_OK)
     {
+        ClearMacStall();
         entry->attempts++;
         s_tx_in_flight = true;
         s_tx_kind = LORAWAN_TX_KIND_TELEMETRY;
@@ -982,6 +1168,7 @@ static void TrySendHead(uint32_t now_ms)
     }
     else if (status == LORAMAC_STATUS_DUTYCYCLE_RESTRICTED)
     {
+        ClearMacStall();
         s_next_action_tick_ms =
             now_ms + request.ReqReturn.DutyCycleWaitTime;
         lorawan_uplink_service_diag.next_action_tick_ms =
@@ -992,6 +1179,7 @@ static void TrySendHead(uint32_t now_ms)
     }
     else if (status == LORAMAC_STATUS_BUSY)
     {
+        NoteMacStall(now_ms);
         s_next_action_tick_ms =
             now_ms + LORAWAN_UPLINK_BUSY_RETRY_MS;
         lorawan_uplink_service_diag.next_action_tick_ms =
@@ -1006,6 +1194,7 @@ static void TrySendHead(uint32_t now_ms)
     }
     else
     {
+        NoteMacStall(now_ms);
         entry->attempts++;
         lorawan_uplink_service_diag.tx_failure_count++;
 
@@ -1051,6 +1240,9 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
     s_control_response_size = 0U;
     s_control_response_attempts = 0U;
     s_mac_flush_attempts = 0U;
+    s_mac_stall_active = false;
+    s_mac_recoveries_without_success = 0U;
+    s_fcnt_ready = false;
     s_joined = false;
     s_tx_in_flight = false;
     s_tx_kind = LORAWAN_TX_KIND_NONE;
@@ -1116,6 +1308,15 @@ lorawan_uplink_status_t LoRaWanUplinkService_Init(
         lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
         FaultManager_Raise(BOLUS_FAULT_RF_COMM);
         return LORAWAN_UPLINK_ERROR_MIB;
+    }
+
+    if (lorawan_uplink_service_diag.credentials_provisioned &&
+        !RestoreUplinkCounter())
+    {
+        lorawan_uplink_service_diag.fcnt_storage_failure_count++;
+        lorawan_uplink_service_diag.state = LORAWAN_UPLINK_STATE_ERROR;
+        FaultManager_Raise(BOLUS_FAULT_RF_COMM);
+        return LORAWAN_UPLINK_ERROR_MAC_INIT;
     }
 
     mac_status = LoRaMacStart();
@@ -1204,6 +1405,16 @@ void LoRaWanUplinkService_Process(uint32_t now_ms)
     {
         RecoverTimedOutTx();
     }
+
+    if (s_mac_stall_active && !s_tx_in_flight &&
+        (uint32_t)(now_ms - s_mac_stall_started_ms) >= LORAWAN_MAC_STALL_LIMIT_MS)
+    {
+        RecoverStalledMac(now_ms);
+    }
+
+    if (!s_tx_in_flight && s_queue_count == 0U &&
+        !s_control_response_pending && s_joined)
+        ClearMacStall();
 
     if (!lorawan_uplink_service_diag.credentials_provisioned)
     {
